@@ -1,0 +1,22 @@
+{
+  "manifest_version": 2,
+  "name": "Twitch Ad Blocker",
+  "version": "1.0.0",
+  "description": "Blocks server-side injected ads on Twitch.tv by filtering HLS playlists",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "*://*.twitch.tv/*",
+    "*://*.ttvnw.net/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.twitch.tv/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
