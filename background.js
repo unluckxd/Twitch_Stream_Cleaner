@@ -4,121 +4,103 @@
  * Licensed under the MIT License.
  */
 
-function filterAdSegments(playlistContent) {
-  const lines = playlistContent.split('\n');
-  const filteredLines = [];
+console.log('[TwitchCleaner] Background script STARTED.');
+
+function processPlaylist(text) {
+  const lines = text.split('\n');
+  const cleanLines = [];
   
-  let inAdBlock = false;
-  let skipNextSegment = false;
-  let i = 0;
-  
-  while (i < lines.length) {
+  let isAdSegment = false;
+
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const trimmedLine = line.trim();
-    
-    if (trimmedLine.includes('#EXT-X-DATERANGE') && trimmedLine.includes('stitched-ad-')) {
-      inAdBlock = true;
-      i++;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('#EXTM3U') || 
+        trimmed.startsWith('#EXT-X-VERSION') ||
+        trimmed.startsWith('#EXT-X-TARGETDURATION') ||
+        trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
+      cleanLines.push(line);
       continue;
     }
-    
-    if (trimmedLine.includes('#EXT-X-SCTE35')) {
-      skipNextSegment = true;
-      i++;
+
+    if (trimmed.includes('#EXT-X-DATERANGE') && trimmed.includes('stitched-ad')) {
+      isAdSegment = true;
+      console.log('[TwitchCleaner] Начался блок рекламы (DATERANGE)');
       continue;
     }
-    
-    if (trimmedLine.includes('#EXT-X-DISCONTINUITY')) {
-      let j = i + 1;
-      let isAdDiscontinuity = false;
-      while (j < Math.min(i + 10, lines.length)) {
-        const nextLine = lines[j].trim();
-        if (nextLine.includes('stitched-ad-') || 
-            nextLine.includes('#EXT-X-SCTE35') ||
-            nextLine.includes('TWITCH-AD-')) {
-          isAdDiscontinuity = true;
-          break;
-        }
-        if (nextLine.startsWith('#EXTINF')) break;
-        j++;
-      }
-      
-      if (isAdDiscontinuity) {
-        inAdBlock = true;
-      } else {
-        filteredLines.push(line);
-      }
-      i++;
-      continue;
+
+    if (isAdSegment && trimmed.includes('#EXT-X-DISCONTINUITY')) {
+      continue; 
     }
-    
-    if (trimmedLine.startsWith('#EXTINF')) {
-      if (inAdBlock || skipNextSegment) {
-        i += 2; 
-        skipNextSegment = false;
-        
-        if (i < lines.length && !lines[i].trim().startsWith('#EXTINF')) {
-          inAdBlock = false;
-        }
+
+    if (trimmed.startsWith('#EXTINF') && isAdSegment) {
+        i++; 
         continue;
-      } else {
-        filteredLines.push(line);
-        i++;
-        if (i < lines.length) {
-          filteredLines.push(lines[i]);
-          i++;
-        }
+    }
+
+    if (!trimmed.startsWith('#') && isAdSegment) {
         continue;
+    }
+
+    if (trimmed.includes('#EXT-X-PROGRAM-DATE-TIME')) {
+      if (isAdSegment) {
+          console.log('[TwitchCleaner] Конец блока рекламы');
+          isAdSegment = false;
       }
     }
-    
-    if (trimmedLine.includes('#EXT-X-PROGRAM-DATE-TIME') && inAdBlock) {
-      inAdBlock = false;
+
+    if (trimmed.includes('SCTE35')) {
+       continue;
     }
-    
-    if (!inAdBlock) {
-      filteredLines.push(line);
+
+    if (!isAdSegment) {
+      cleanLines.push(line);
     }
-    
-    i++;
   }
-  
-  return filteredLines.join('\n');
+
+  return cleanLines.join('\n');
 }
 
 browser.webRequest.onBeforeRequest.addListener(
   function(details) {
-    if (!details.url.includes('.m3u8')) {
-      return {};
-    }
-    
+    if (!details.url.includes('.m3u8')) return {};
+
     const filter = browser.webRequest.filterResponseData(details.requestId);
     const decoder = new TextDecoder("utf-8");
     const encoder = new TextEncoder();
     
-    let responseData = [];
+    let chunks = []; 
 
     filter.ondata = event => {
-      responseData.push(event.data);
+      chunks.push(event.data);
     };
 
     filter.onstop = event => {
       let str = "";
-      for (let buffer of responseData) {
-        str += decoder.decode(buffer, { stream: true });
+      for (let chunk of chunks) {
+        str += decoder.decode(chunk, { stream: true });
       }
       str += decoder.decode();
 
-      const filteredPlaylist = filterAdSegments(str);
+      try {
+        const result = processPlaylist(str);
+        filter.write(encoder.encode(result));
+      } catch (e) {
+        console.error('[TwitchCleaner] Error:', e);
+        filter.write(encoder.encode(str));
+      }
       
-      filter.write(encoder.encode(filteredPlaylist));
       filter.close();
     };
     
     return {};
   },
-  {
-    urls: ["*://*.ttvnw.net/*"]
+  { 
+    urls: [
+      "*://video-weaver.*.hls.ttvnw.net/*",
+      "*://*.ttvnw.net/*"
+    ] 
   },
   ["blocking"]
 );

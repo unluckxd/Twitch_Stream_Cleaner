@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Twitch Ad Blocker",
-  "version": "1.0.0",
-  "description": "Blocks server-side injected ads on Twitch.tv by filtering HLS playlists",
+  "name": "Twitch Stream Cleaner",
+  "version": "1.2.0",
+  "description": "Removes ads from Twitch streams.",
   "permissions": [
     "webRequest",
     "webRequestBlocking",
@@ -18,5 +18,10 @@
       "js": ["content.js"],
       "run_at": "document_start"
     }
-  ]
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "twitch-cleaner@localhost"
+    }
+  }
 }

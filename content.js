@@ -4,82 +4,44 @@
  * Licensed under the MIT License.
  */
 
-function hideAdElements() {
-  const style = document.createElement('style');
-  style.textContent = `
-    .ad-banner, .ad-overlay, [class*="AdBanner"], [class*="AdOverlay"],
-    [data-test-selector="ad-banner"], [data-a-target="video-ad-label"],
-    [data-a-target="video-ad-countdown"], .commercial-break,
-    [class*="CommercialBreak"], [data-test-selector="commercial-break-overlay"],
-    .tw-animated-ad, [class*="AnimatedAdUnit"] {
-      display: none !important;
-      visibility: hidden !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-      height: 0 !important;
-      width: 0 !important;
-      z-index: -1000 !important;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function removeAdContainers() {
-  const selectors = [
-    '[class*="ad-banner"]',
-    '[class*="video-ad"]',
-    '[data-a-target="video-ad-label"]',
-    '[data-a-target="video-ad-countdown"]'
-  ];
-  
-  selectors.forEach(selector => {
-    const elements = document.querySelectorAll(selector);
-    elements.forEach(el => el.remove());
-  });
-}
-
-function observeAdElements() {
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      mutation.addedNodes.forEach((node) => {
-        if (node.nodeType === 1) {
-          const adElements = node.querySelectorAll ? 
-            node.querySelectorAll('[class*="ad-"], [class*="Ad"], [data-a-target*="ad"]') : [];
-          
-          adElements.forEach(el => {
-            const className = el.className || '';
-            const dataTarget = el.getAttribute('data-a-target') || '';
-            
-            if (className.includes('ad-banner') || className.includes('AdBanner') || dataTarget.includes('video-ad')) {
-              el.remove();
-            }
-          });
-        }
-      });
-    });
-  });
-  
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-function patchPlayerConfig() {
-  const originalParse = JSON.parse;
-  JSON.parse = function(...args) {
-    const result = originalParse.apply(this, args);
-    if (result && typeof result === 'object') {
-      if (result.adsEnabled !== undefined) result.adsEnabled = false;
-      if (result.showAds !== undefined) result.showAds = false;
-    }
-    return result;
-  };
-}
+const CSS_HIDE = `
+  .ad-slot-overlay, .ad-banner, .ad-overlay, 
+  [data-test-selector="ad-banner-default-text"],
+  [data-a-target="video-ad-label"],
+  [data-a-target="video-ad-countdown"],
+  .commercial-break, .tw-animated-ad {
+    display: none !important;
+    height: 0 !important;
+    width: 0 !important;
+    pointer-events: none !important;
+    z-index: -9999 !important;
+  }
+`;
 
 function init() {
-  hideAdElements();
-  removeAdContainers();
-  observeAdElements();
-  patchPlayerConfig();
-  setInterval(removeAdContainers, 2000);
+  const style = document.createElement('style');
+  style.id = 'cleaner-css';
+  style.textContent = CSS_HIDE;
+  (document.head || document.documentElement).appendChild(style);
+
+  try {
+    const origParse = JSON.parse;
+    JSON.parse = function(text) {
+      const data = origParse.apply(this, arguments);
+      if (data && typeof data === 'object') {
+        if (data.adsEnabled) data.adsEnabled = false;
+        if (data.stitched) data.stitched = false;
+      }
+      return data;
+    };
+  } catch(e) {}
+
+  setInterval(() => {
+    const ads = document.querySelectorAll('[data-a-target="video-ad-label"], .ad-banner');
+    if (ads.length > 0) {
+      ads.forEach(el => el.remove());
+    }
+  }, 3000);
 }
 
 if (document.readyState === 'loading') {
