@@ -169,15 +169,19 @@ browser.webRequest.onBeforeRequest.addListener(
       for (let chunk of chunks) str += decoder.decode(chunk, { stream: true });
       str += decoder.decode();
       
-      if (str.includes('twitch-stitched-ad')) {
-        console.log('[TwitchCleaner] 🔍 AD PLAYLIST DETECTED');
+      if (str.includes('CLASS="twitch-stitched-ad"') && !str.includes('#EXTINF')) {
+        console.log('[TwitchCleaner] Blocking ad-only playlist');
+        updateStats(0);
+        logToUI('Blocked ad-only playlist');
+        filter.disconnect();
+        return;
       }
 
       try {
         const result = processPlaylist(str);
         filter.write(encoder.encode(result));
       } catch (e) {
-        console.error('[TwitchCleaner] ❌ Error:', e);
+        console.error('[TwitchCleaner] Error:', e);
         filter.write(encoder.encode(str));
       }
       filter.close();
