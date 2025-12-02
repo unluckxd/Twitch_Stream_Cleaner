@@ -40,49 +40,32 @@ Twitch uses complex ad injection methods. This extension employs a multi-layered
 
 ## Installation
 
-### Download Latest Release
+### Official Firefox Add-on (Recommended)
 
-**[Download Latest XPI](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases/latest)**
+**[Install from Firefox Add-ons](https://addons.mozilla.org/ru/firefox/addon/twitch-stream-cleaner/)** ← **Official Mozilla Store**
 
-#### For Firefox Developer Edition or Nightly (Recommended)
+1. Click the link above to open the Firefox Add-ons page
+2. Click **"Add to Firefox"**
+3. Confirm the installation
+4. Done! Extension is now active
 
-1. Download **[Firefox Developer Edition](https://www.mozilla.org/firefox/developer/)**
-2. Open `about:config` in the address bar
-3. Search for `xpinstall.signatures.required`
-4. Set the value to `false`
-5. Download the `.xpi` file from the [Releases page](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases)
-6. Drag and drop the `.xpi` file into Firefox to install
+*Official Mozilla distribution - automatically updated*
 
-#### For Standard Firefox (Temporary Installation)
+---
 
-*Extension will work until browser restart*
+### Alternative: Build From Source
 
-1. Download the `.xpi` file from the [Releases page](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases)
-2. Open `about:debugging` in Firefox
-3. Click **"This Firefox"**
-4. Click **"Load Temporary Add-on..."**
-5. Select the downloaded `.xpi` file
-
-### Option 1: Temporary (Developer Mode)
-*Recommended for testing and development.*
-
-1.  Clone or download this repository.
-2.  Open Firefox and navigate to `about:debugging`.
-3.  Click **"This Firefox"** on the left sidebar.
-4.  Click **"Load Temporary Add-on..."**.
-5.  Select the `manifest.json` file from the project folder.
-
-### Option 2: Build From Source
+#### For Firefox Developer Edition
 
 ```powershell
 # Clone repository
 git clone https://github.com/unluckxd/Twitch_Stream_Cleaner.git
 cd Twitch_Stream_Cleaner
 
-# Build XPI file
+# Build unsigned XPI file
 .\build.ps1
 
-# Install the generated .xpi file in Firefox
+# For permanent installation, submit to Mozilla for signing
 ```
 
 ## Troubleshooting / FAQ
