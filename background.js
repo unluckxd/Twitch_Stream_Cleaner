@@ -81,8 +81,8 @@ function processPlaylist(text) {
   
   const startTime = performance.now();
   
-  if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
-    console.log('[TwitchCleaner] 🚫 AD-ONLY playlist detected - returning empty response');
+  if (text.includes('CLASS="twitch-stitched-ad"') && !text.includes('#EXTINF')) {
+    console.log('[TwitchCleaner] AD-ONLY playlist - returning empty response');
     const blockTime = performance.now() - startTime;
     updateStats(blockTime);
     logToUI('Blocked ad-only playlist');
@@ -114,7 +114,7 @@ function processPlaylist(text) {
       continue;
     }
 
-    if (trimmed.includes('#EXT-X-DATERANGE') && trimmed.includes('stitched-ad')) {
+    if (trimmed.includes('#EXT-X-DATERANGE') && trimmed.includes('CLASS="twitch-stitched-ad"')) {
       isAdSegment = true;
       adBlockedSegments++;
       continue;
@@ -169,15 +169,15 @@ browser.webRequest.onBeforeRequest.addListener(
       for (let chunk of chunks) str += decoder.decode(chunk, { stream: true });
       str += decoder.decode();
       
-      if (str.includes('stitched-ad')) {
-        console.log('[TwitchCleaner] FULL AD PLAYLIST:\n' + str);
+      if (str.includes('twitch-stitched-ad')) {
+        console.log('[TwitchCleaner] 🔍 AD PLAYLIST DETECTED');
       }
 
       try {
         const result = processPlaylist(str);
         filter.write(encoder.encode(result));
       } catch (e) {
-        console.error('[TwitchCleaner] Error:', e);
+        console.error('[TwitchCleaner] ❌ Error:', e);
         filter.write(encoder.encode(str));
       }
       filter.close();

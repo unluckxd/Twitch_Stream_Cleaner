@@ -40,6 +40,29 @@ Twitch uses complex ad injection methods. This extension employs a multi-layered
 
 ## Installation
 
+### Download Latest Release
+
+**[Download Latest XPI](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases/latest)**
+
+#### For Firefox Developer Edition or Nightly (Recommended)
+
+1. Download **[Firefox Developer Edition](https://www.mozilla.org/firefox/developer/)**
+2. Open `about:config` in the address bar
+3. Search for `xpinstall.signatures.required`
+4. Set the value to `false`
+5. Download the `.xpi` file from the [Releases page](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases)
+6. Drag and drop the `.xpi` file into Firefox to install
+
+#### For Standard Firefox (Temporary Installation)
+
+*Extension will work until browser restart*
+
+1. Download the `.xpi` file from the [Releases page](https://github.com/unluckxd/Twitch_Stream_Cleaner/releases)
+2. Open `about:debugging` in Firefox
+3. Click **"This Firefox"**
+4. Click **"Load Temporary Add-on..."**
+5. Select the downloaded `.xpi` file
+
 ### Option 1: Temporary (Developer Mode)
 *Recommended for testing and development.*
 
@@ -49,13 +72,18 @@ Twitch uses complex ad injection methods. This extension employs a multi-layered
 4.  Click **"Load Temporary Add-on..."**.
 5.  Select the `manifest.json` file from the project folder.
 
-### Option 2: Permanent (Unsigned)
-*For Firefox Developer Edition or Nightly.*
+### Option 2: Build From Source
 
-1.  Zip the contents of the folder (select files -> Right Click -> Send to Compressed Folder).
-2.  Rename the file from `.zip` to `.xpi`.
-3.  Drag and drop the `.xpi` file into Firefox.
-4.  *(Note: Standard Firefox requires extensions to be signed by Mozilla).*
+```powershell
+# Clone repository
+git clone https://github.com/unluckxd/Twitch_Stream_Cleaner.git
+cd Twitch_Stream_Cleaner
+
+# Build XPI file
+.\build.ps1
+
+# Install the generated .xpi file in Firefox
+```
 
 ## Troubleshooting / FAQ
 
