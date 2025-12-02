@@ -80,11 +80,27 @@ function processPlaylist(text) {
   if (!IS_ENABLED) return text;
   
   const startTime = performance.now();
+  
+  if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
+    console.log('[TwitchCleaner] 🚫 AD-ONLY playlist detected - returning empty response');
+    const blockTime = performance.now() - startTime;
+    updateStats(blockTime);
+    logToUI('Blocked ad-only playlist');
+    
+    return `#EXTM3U
+    #EXT-X-VERSION:3
+    #EXT-X-TARGETDURATION:2
+    #EXT-X-MEDIA-SEQUENCE:0
+    #EXTINF:2.0,
+    #EXT-X-ENDLIST`;
+  }
+  
   const lines = text.split('\n');
   const cleanLines = [];
   
   let isAdSegment = false;
   let adBlockedSegments = 0;
+  let segmentsSkipped = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -101,44 +117,37 @@ function processPlaylist(text) {
     if (trimmed.includes('#EXT-X-DATERANGE') && trimmed.includes('stitched-ad')) {
       isAdSegment = true;
       adBlockedSegments++;
-      console.log('[TwitchCleaner] Ad block started (DATERANGE)');
       continue;
     }
 
-    if (isAdSegment && trimmed.includes('#EXT-X-DISCONTINUITY')) {
-      continue; 
-    }
-
-    if (trimmed.startsWith('#EXTINF') && isAdSegment) {
-        i++; 
+    if (isAdSegment) {
+      if (trimmed.includes('#EXT-X-PROGRAM-DATE-TIME') && !trimmed.includes('stitched-ad')) {
+        isAdSegment = false;
+        cleanLines.push(line);
         continue;
-    }
-
-    if (!trimmed.startsWith('#') && isAdSegment) {
-        continue;
-    }
-
-    if (trimmed.includes('#EXT-X-PROGRAM-DATE-TIME')) {
-      if (isAdSegment) {
-          console.log('[TwitchCleaner] Ad block ended');
-          isAdSegment = false;
       }
+      
+      if (trimmed.startsWith('#EXTINF')) {
+        segmentsSkipped++;
+        i++;
+        continue;
+      }
+      
+      continue;
     }
 
     if (trimmed.includes('SCTE35')) {
        continue;
     }
 
-    if (!isAdSegment) {
-      cleanLines.push(line);
-    }
+    cleanLines.push(line);
   }
 
   if (adBlockedSegments > 0) {
     const blockTime = performance.now() - startTime;
-    console.log(`[TwitchCleaner] Blocked ${adBlockedSegments} ad segments in ${blockTime.toFixed(2)}ms`);
+    console.log(`[TwitchCleaner] Blocked ${adBlockedSegments} ad blocks, ${segmentsSkipped} segments in ${blockTime.toFixed(2)}ms`);
     updateStats(blockTime);
-    logToUI(`Blocked ${adBlockedSegments} ad segments`);
+    logToUI(`Blocked ${adBlockedSegments} ad blocks (${segmentsSkipped} segments)`);
   }
 
   return cleanLines.join('\n');
@@ -147,8 +156,6 @@ function processPlaylist(text) {
 browser.webRequest.onBeforeRequest.addListener(
   function(details) {
     if (!details.url.includes('.m3u8')) return {};
-    
-    console.log('[TwitchCleaner] Processing playlist:', details.url);
 
     const filter = browser.webRequest.filterResponseData(details.requestId);
     const decoder = new TextDecoder("utf-8");
@@ -161,12 +168,16 @@ browser.webRequest.onBeforeRequest.addListener(
       let str = "";
       for (let chunk of chunks) str += decoder.decode(chunk, { stream: true });
       str += decoder.decode();
+      
+      if (str.includes('stitched-ad')) {
+        console.log('[TwitchCleaner] FULL AD PLAYLIST:\n' + str);
+      }
 
       try {
         const result = processPlaylist(str);
         filter.write(encoder.encode(result));
       } catch (e) {
-        console.error('[TwitchCleaner] Error processing playlist:', e);
+        console.error('[TwitchCleaner] Error:', e);
         filter.write(encoder.encode(str));
       }
       filter.close();
