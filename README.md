@@ -1,6 +1,5 @@
 # Twitch Stream Cleaner
 
-![Logo](logo.png)
 
 > **"Watch streams, not ads."**
 
@@ -19,7 +18,7 @@ A lightweight, open-source Firefox extension that removes server-side injected a
 * **Performance:** Optimized regex parsing ensures 0ms latency added to stream loading.
 * **UI Cleanup:** Automatically hides "Ad in progress" banners and overlays.
 
-## 🔧 How It Works
+## How It Works
 
 Twitch uses **SSAI (Server-Side Ad Injection)**. This means ads are stitched directly into the video file (`.m3u8` playlist) on the server, making them invisible to traditional ad blockers like uBlock Origin.
 
@@ -64,17 +63,17 @@ A: Twitch updates their playlist format frequently.
 **Q: Does this work on Chrome?**
 A: No. Chrome's Manifest V3 removed the blocking webRequest API required for this method to work effectively. This is a Firefox-exclusive advantage.
 
-## 📂 Project Structure
+## Project Structure
 
 * `manifest.json` - Extension configuration and permissions (Manifest V2).
 * `background.js` - The core logic. Intercepts network requests and cleans the HLS playlists.
 * `content.js` - Cleans up visual elements (DOM) on the Twitch page.
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 This project is for **educational purposes only**. It demonstrates how HLS stream manipulation works in browser extensions. I am not affiliated with Twitch/Amazon. Blocking ads affects content creators; please consider subscribing to the streamers you watch or using Twitch Turbo.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
