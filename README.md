@@ -64,9 +64,17 @@ cd Twitch_Stream_Cleaner
 
 # Build unsigned XPI file
 .\build.ps1
-
-# For permanent installation, submit to Mozilla for signing
 ```
+
+#### Load Temporary Add-on for Development
+
+1. Open Firefox and navigate to `about:debugging`
+2. Click **"This Firefox"** in the left sidebar
+3. Click **"Load Temporary Add-on..."**
+4. Navigate to the extension folder and select `manifest.json`
+5. The extension will be loaded until Firefox restarts
+
+*Note: Temporary add-ons are removed on browser restart. For permanent installation, use the official Firefox Add-ons store.*
 
 ## Troubleshooting / FAQ
 
