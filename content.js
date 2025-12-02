@@ -152,15 +152,13 @@ function nukeAds() {
   blockedElementsCache = currentBlockedElements;
 }
 
+injectConfigPatcher();
+injectStyles();
+
 function init() {
   browser.storage.local.get(['isEnabled'], (data) => {
     if (data.isEnabled !== false) {
-      
-      injectStyles();
-      injectConfigPatcher();
-      
       setInterval(nukeAds, 1000);
-      
       console.log('[TwitchCleaner] UI Blocker Active');
     }
   });
