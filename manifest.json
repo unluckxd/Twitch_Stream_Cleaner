@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Twitch Stream Cleaner",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Advanced ad blocking with UI and statistics.",
   "permissions": [
     "webRequest",
@@ -12,8 +12,8 @@
   ],
   "browser_action": {
     "default_icon": {
-      "48": "icons/icon-48.png",
-      "96": "icons/icon-96.png"
+      "48": "icon-48.png",
+      "96": "icon-96.png"
     },
     "default_title": "Stream Cleaner Settings",
     "default_popup": "popup.html"
@@ -29,8 +29,8 @@
     }
   ],
   "icons": {
-    "48": "icons/icon-48.png",
-    "96": "icons/icon-96.png"
+    "48": "icon-48.png",
+    "96": "icon-96.png"
   },
   "browser_specific_settings": {
     "gecko": {

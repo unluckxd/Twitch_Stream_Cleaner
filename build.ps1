@@ -15,31 +15,14 @@ $files = @(
     "popup.html",
     "popup.css",
     "popup.js",
+    "icon-48.png",
+    "icon-96.png",
     "LICENSE",
     "README.md"
 )
 
-# Create temporary directory for proper structure
-$tempDir = "temp_build"
-if (Test-Path $tempDir) {
-    Remove-Item $tempDir -Recurse -Force
-}
-New-Item -ItemType Directory -Path $tempDir | Out-Null
-New-Item -ItemType Directory -Path "$tempDir\icons" | Out-Null
-
-# Copy files maintaining structure
-foreach ($file in $files) {
-    Copy-Item $file "$tempDir\$file"
-}
-Copy-Item "icons\icon-48.png" "$tempDir\icons\icon-48.png"
-Copy-Item "icons\icon-96.png" "$tempDir\icons\icon-96.png"
-
-# Create archive from temp directory
-Compress-Archive -Path "$tempDir\*" -DestinationPath "$filename.zip" -Force
+Compress-Archive -Path $files -DestinationPath "$filename.zip" -Force
 Rename-Item "$filename.zip" $filename
-
-# Cleanup
-Remove-Item $tempDir -Recurse -Force
 
 Write-Host "Created $filename" -ForegroundColor Green
 $sizeKB = [math]::Round((Get-Item $filename).Length / 1KB, 2)
