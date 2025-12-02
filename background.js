@@ -88,11 +88,11 @@ function processPlaylist(text) {
     logToUI('Blocked ad-only playlist');
     
     return `#EXTM3U
-    #EXT-X-VERSION:3
-    #EXT-X-TARGETDURATION:2
-    #EXT-X-MEDIA-SEQUENCE:0
-    #EXTINF:2.0,
-    #EXT-X-ENDLIST`;
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:2.0,
+#EXT-X-ENDLIST`;
   }
   
   const lines = text.split('\n');
@@ -114,14 +114,15 @@ function processPlaylist(text) {
       continue;
     }
 
-    if (trimmed.includes('#EXT-X-DATERANGE') && trimmed.includes('CLASS="twitch-stitched-ad"')) {
+    if (trimmed.includes('#EXT-X-DATERANGE') && 
+        (trimmed.includes('CLASS="twitch-stitched-ad"') || trimmed.includes('SCTE35'))) {
       isAdSegment = true;
       adBlockedSegments++;
       continue;
     }
 
     if (isAdSegment) {
-      if (trimmed.includes('#EXT-X-PROGRAM-DATE-TIME') && !trimmed.includes('stitched-ad')) {
+      if (trimmed.startsWith('#EXT-X-DATERANGE') && !trimmed.includes('stitched-ad') && !trimmed.includes('SCTE35')) {
         isAdSegment = false;
         cleanLines.push(line);
         continue;
@@ -129,7 +130,19 @@ function processPlaylist(text) {
       
       if (trimmed.startsWith('#EXTINF')) {
         segmentsSkipped++;
-        i++;
+        if (i + 1 < lines.length) i++;
+        continue;
+      }
+      
+      if (trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME')) {
+        continue;
+      }
+      
+      if (trimmed.startsWith('http') || trimmed.match(/^[a-zA-Z0-9_-]+\.ts$/)) {
+        continue;
+      }
+      
+      if (trimmed.startsWith('#EXT-X-DISCONTINUITY')) {
         continue;
       }
       

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Twitch Stream Cleaner",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "Advanced ad blocking with UI and statistics.",
   "permissions": [
     "webRequest",
@@ -34,7 +34,10 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "twitch-cleaner-ui@local"
+      "id": "twitch-cleaner-ui@local",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }

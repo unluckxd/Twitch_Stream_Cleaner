@@ -70,7 +70,13 @@ function addLogLine(text) {
   const div = document.createElement('div');
   div.className = 'log-line';
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric" });
-  div.innerHTML = `<span class="log-time">${time}</span> ${text}`;
+  
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'log-time';
+  timeSpan.textContent = time;
+  
+  div.appendChild(timeSpan);
+  div.appendChild(document.createTextNode(' ' + text));
   elements.logs.prepend(div);
 }
 
