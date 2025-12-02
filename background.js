@@ -52,8 +52,10 @@ function updateStats(blockTime = 0) {
     ? BLOCK_TIMES.reduce((a, b) => a + b, 0) / BLOCK_TIMES.length 
     : 0;
   
-  browser.storage.local.set({ blockedCount: BLOCKED_COUNT, avgBlockTime: avgTime });
-  browser.runtime.sendMessage({ type: 'UPDATE_STATS', count: BLOCKED_COUNT, avgTime: avgTime }).catch(() => {});
+  const formattedAvgTime = parseFloat(avgTime.toFixed(3));
+  
+  browser.storage.local.set({ blockedCount: BLOCKED_COUNT, avgBlockTime: formattedAvgTime });
+  browser.runtime.sendMessage({ type: 'UPDATE_STATS', count: BLOCKED_COUNT, avgTime: formattedAvgTime }).catch(() => {});
 }
 
 browser.runtime.onMessage.addListener((msg) => {

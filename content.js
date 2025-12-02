@@ -57,6 +57,28 @@ function injectStyles() {
   (document.head || document.documentElement).appendChild(style);
 }
 
+function injectConfigPatcher() {
+  const script = document.createElement('script');
+  script.textContent = `
+    (function() {
+      const origParse = JSON.parse;
+      JSON.parse = function(text) {
+        const data = origParse.apply(this, arguments);
+        if (data && typeof data === 'object') {
+          if (data.adsEnabled) data.adsEnabled = false;
+          if (data.stitched) data.stitched = false;
+          if (data.show_ads) data.show_ads = false;
+          if (data.disable_ads) data.disable_ads = true;
+        }
+        return data;
+      };
+      console.log('[TwitchCleaner] JSON.parse patched in page context');
+    })();
+  `;
+  (document.head || document.documentElement).appendChild(script);
+  script.remove();
+}
+
 let lastAdBlockTime = 0;
 let blockedElementsCache = new Set();
 
@@ -135,20 +157,9 @@ function init() {
     if (data.isEnabled !== false) {
       
       injectStyles();
+      injectConfigPatcher();
       
-      try {
-        const origParse = JSON.parse;
-        JSON.parse = function(text) {
-          const data = origParse.apply(this, arguments);
-          if (data && typeof data === 'object') {
-            if (data.adsEnabled) data.adsEnabled = false;
-            if (data.stitched) data.stitched = false;
-          }
-          return data;
-        };
-      } catch(e) {}
-      
-      setInterval(nukeAds, 3000);
+      setInterval(nukeAds, 1000);
       
       console.log('[TwitchCleaner] UI Blocker Active');
     }

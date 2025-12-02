@@ -1,77 +1,85 @@
 # Twitch Stream Cleaner
 
+<p align="center">
+  <img src="logo.png" width="150" height="150" alt="StreamCleaner Logo">
+</p>
 
-> **"Watch streams, not ads."**
+<p align="center">
+  <strong>"Watch streams, not ads."</strong>
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Firefox](https://img.shields.io/badge/firefox-v120%2B-orange)
-![Manifest](https://img.shields.io/badge/manifest-v2-green)
-![Size](https://img.shields.io/badge/size-%3C50kb-brightgreen)
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
+  <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
+  <img src="https://img.shields.io/badge/size-%3C100kb-brightgreen" alt="Lightweight">
+</p>
 
-A lightweight, open-source Firefox extension that removes server-side injected ads (SSAI) from Twitch streams by filtering HLS playlists in real-time.
+---
 
-## Features
+**Twitch Stream Cleaner** is a specialized, lightweight Firefox extension engineered to block Twitch ads without compromising stream latency or privacy. It features a hybrid blocking engine and a real-time engineering dashboard to monitor performance.
 
-* **Reliable Filtering:** Uses "Segment Stripping" technique to surgically remove ad segments from the video stream without breaking the player.
-* **Privacy First:** Runs 100% locally on your browser. No VPNs, no proxies, no external servers.
-* **Zero Config:** Just install and watch. No settings to tweak.
-* **Performance:** Optimized regex parsing ensures 0ms latency added to stream loading.
-* **UI Cleanup:** Automatically hides "Ad in progress" banners and overlays.
+## Key Features
+
+* **Hybrid Blocking Engine:** Combines **SSAI Segment Stripping** (removing ads from the HLS playlist) with **Request Blocking** (preventing client-side ad modules from loading).
+* **Engineering Dashboard:** A built-in dark-mode UI monitoring real-time metrics:
+    * **Segments Stripped:** Exact count of ad segments removed.
+    * **Avg. Latency:** Processing overhead (typically < 0.1ms).
+    * **Last Intervention:** Time since the last ad block.
+* **Privacy & Telemetry Protection:** Automatically blocks trackers from ScorecardResearch, Amazon AdSystem, and Comscore.
+* **Zero Latency:** Optimized parsing logic ensures no delay is added to the stream buffering.
+* **UI Cleanup:** Automatically hides "Ad in progress" overlays, purple screens, and banner containers.
 
 ## How It Works
 
-Twitch uses **SSAI (Server-Side Ad Injection)**. This means ads are stitched directly into the video file (`.m3u8` playlist) on the server, making them invisible to traditional ad blockers like uBlock Origin.
+Twitch uses complex ad injection methods. This extension employs a multi-layered approach:
 
-This extension uses the powerful **Firefox `webRequest.filterResponseData` API** to:
-1.  **Intercept** the `.m3u8` playlist network request before it reaches the video player.
-2.  **Scan** the text for ad markers (tags like `stitched-ad`, `SCTE-35`, `DATERANGE`).
-3.  **Strip** the ad segments while preserving the stream headers and structure.
-4.  **Serve** the clean playlist to the player.
-
-The result? The player never "knows" an ad was supposed to play.
+1.  **Network Layer (Background):** Intercepts `.m3u8` playlists via the `webRequest.filterResponseData` API. It parses the stream, identifies ad markers (`stitched-ad`, `DATERANGE`), and removes them while preserving the stream integrity (headers, discontinuities).
+2.  **Script Blocking:** Prevents the loading of external scripts (like `client-side-video-ads.js`), forcing the player to fallback to the main stream, which we have already cleaned.
+3.  **Content Injection:** A lightweight agent injects a script into the page context to patch `JSON.parse`, disabling player flags like `adsEnabled` and `stitched`.
 
 ## Installation
 
 ### Option 1: Temporary (Developer Mode)
-*Best for testing or if you want to modify the code.*
+*Recommended for testing and development.*
 
-1.  Download or clone this repository.
-2.  Open Firefox and type `about:debugging` in the address bar.
+1.  Clone or download this repository.
+2.  Open Firefox and navigate to `about:debugging`.
 3.  Click **"This Firefox"** on the left sidebar.
 4.  Click **"Load Temporary Add-on..."**.
-5.  Select the `manifest.json` file from the downloaded folder.
-6.  *Note: The extension will be removed if you fully close Firefox.*
+5.  Select the `manifest.json` file from the project folder.
 
 ### Option 2: Permanent (Unsigned)
-1.  Zip all files inside the folder (not the folder itself).
-2.  Rename the file from `.zip` to `.xpi`.
-3.  Drag and drop the `.xpi` file into Firefox Developer Edition (standard Firefox requires signed extensions).
+*For Firefox Developer Edition or Nightly.*
 
-### Official Store
-*(Coming soon)*
+1.  Zip the contents of the folder (select files -> Right Click -> Send to Compressed Folder).
+2.  Rename the file from `.zip` to `.xpi`.
+3.  Drag and drop the `.xpi` file into Firefox.
+4.  *(Note: Standard Firefox requires extensions to be signed by Mozilla).*
 
 ## Troubleshooting / FAQ
 
-**Q: I see a black screen for a few seconds.**
-A: This is normal. When an ad is removed, the player switches to the next live segment. Sometimes this transition causes a brief pause or quality drop (480p). It's better than watching 3 minutes of ads.
+**Q: I see a black screen or buffering for a split second.**
+A: This is normal. When an ad segment is removed, the player skips the "hole" in the timeline to jump to the live segment. A brief quality drop or pause is expected during this transition.
 
-**Q: I got "Error #2000" or "Network Error".**
-A: Twitch updates their playlist format frequently.
+**Q: "Error #2000" or Network Error.**
+A: Twitch updates their playlist structure frequently.
 1.  Refresh the page (F5).
-2.  If it persists, reload the extension in `about:debugging`.
+2.  If it persists, click the extension icon and check the "Avg. Latency". If it's high, reload the extension in `about:debugging`.
 
 **Q: Does this work on Chrome?**
-A: No. Chrome's Manifest V3 removed the blocking webRequest API required for this method to work effectively. This is a Firefox-exclusive advantage.
+A: **No.** Chrome's Manifest V3 specification removed the blocking capabilities of the `webRequest` API required for this method to work effectively. This tool leverages Firefox's superior API capabilities.
 
 ## Project Structure
 
 * `manifest.json` - Extension configuration and permissions (Manifest V2).
-* `background.js` - The core logic. Intercepts network requests and cleans the HLS playlists.
-* `content.js` - Cleans up visual elements (DOM) on the Twitch page.
+* `background.js` - The core engine. Handles network interception, HLS parsing, and statistics calculation.
+* `content.js` - UI cleaner. Handles DOM manipulation, CSS injection, and page-context script patching.
+* `popup.html` / `popup.css` / `popup.js` - The Engineering Dashboard interface.
 
 ## Disclaimer
 
-This project is for **educational purposes only**. It demonstrates how HLS stream manipulation works in browser extensions. I am not affiliated with Twitch/Amazon. Blocking ads affects content creators; please consider subscribing to the streamers you watch or using Twitch Turbo.
+This project is for **educational and research purposes only**. It demonstrates browser extension capabilities for HLS stream manipulation and network traffic analysis. I am not affiliated with Twitch, Amazon, or any associated companies.
 
 ## License
 
