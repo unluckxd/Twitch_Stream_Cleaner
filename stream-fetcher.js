@@ -66,6 +66,43 @@
     const originalFetch = window.fetch;
     window.fetch = async function(url, options) {
         if (typeof url === 'string' && url.includes('.m3u8')) {
+            if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
+                const channelMatch = url.match(/\/([^\/]+)\.m3u8/) || url.match(/channel=([^&]+)/);
+                if (channelMatch) {
+                    const channelName = channelMatch[1];
+                    
+                    for (const playerType of ['embed', 'frontpage']) {
+                        try {
+                            const tokenData = await getAccessToken(channelName, playerType);
+                            if (!tokenData?.data?.streamPlaybackAccessToken) continue;
+                            
+                            const token = tokenData.data.streamPlaybackAccessToken;
+                            const cleanUrl = new URL(url);
+                            cleanUrl.searchParams.set('sig', token.signature);
+                            cleanUrl.searchParams.set('token', token.value);
+                            cleanUrl.searchParams.set('player_type', playerType);
+                            
+                            const testResponse = await originalFetch(cleanUrl.toString());
+                            if (!testResponse.ok) continue;
+                            
+                            const testText = await testResponse.text();
+                            
+                            if (!testText.includes('stitched-ad') && 
+                                !testText.includes('SCTE35') && 
+                                !testText.includes('twitch-stitched-ad') &&
+                                testText.includes('#EXTINF')) {
+                                console.log(`[StreamFetcher] Preemptively using clean stream (${playerType})`);
+                                return new Response(testText, {
+                                    status: 200,
+                                    headers: testResponse.headers
+                                });
+                            }
+                        } catch (err) {
+                        }
+                    }
+                }
+            }
+            
             const response = await originalFetch.apply(this, arguments);
             
             if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
@@ -142,6 +179,35 @@
         }
         
         return originalFetch.apply(this, arguments);
+    };
+    
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    const originalXHRSend = XMLHttpRequest.prototype.send;
+    
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        this._url = url;
+        return originalXHROpen.apply(this, [method, url, ...rest]);
+    };
+    
+    XMLHttpRequest.prototype.send = function(...args) {
+        if (this._url && typeof this._url === 'string' && this._url.includes('.m3u8')) {
+            const originalOnLoad = this.onload;
+            const originalOnReadyStateChange = this.onreadystatechange;
+            const self = this;
+            
+            this.onreadystatechange = async function() {
+                if (self.readyState === 4 && self.status === 200) {
+                    const text = self.responseText;
+                    if (text && (text.includes('stitched-ad') || text.includes('SCTE35'))) {
+                        console.log('[StreamFetcher] XHR: Ads detected in playlist');
+                    }
+                }
+                if (originalOnReadyStateChange) {
+                    return originalOnReadyStateChange.apply(this, arguments);
+                }
+            };
+        }
+        return originalXHRSend.apply(this, args);
     };
     
     console.log('[StreamFetcher] Initialized');

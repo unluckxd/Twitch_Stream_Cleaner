@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.2.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.2-blue" alt="Version">
 </p>
 
 ---
@@ -23,7 +23,7 @@
 
 * **Three-Layer Protection System:**
     * **Layer 1 - HLS Playlist Cleaner:** Intercepts and strips ad segments from `.m3u8` playlists before they reach the player
-    * **Layer 2 - Alternative Stream Fetcher:** Intelligently switches to ad-free streams using 5 different player types with smart rotation and fallback filtering
+    * **Layer 2 - Alternative Stream Fetcher:** Proactively searches for ad-free streams using 5 different player types, with pre-emptive loading and smart rotation
     * **Layer 3 - Config Patcher:** Disables ad-related flags in Twitch's player configuration via `JSON.parse` patching
 * **Engineering Dashboard:** A built-in dark-mode UI monitoring real-time metrics:
     * **Segments Stripped:** Exact count of ad segments removed
@@ -41,15 +41,22 @@ Twitch uses sophisticated Server-Side Ad Insertion (SSAI) to inject ads directly
 The background script intercepts all `.m3u8` playlist requests using the `webRequest.filterResponseData` API. It parses the HLS manifest in real-time, identifies ad markers (`#EXT-X-DATERANGE` with `SCTE35-OUT`, `stitched-ad` tags), and surgically removes them while preserving stream integrity (headers, discontinuity sequences, and timing).
 
 ### Layer 2: Alternative Stream Fetcher
-A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` requests via `fetch` interception. When ads are detected in the primary stream:
-1. Detects which `playerType` was used in the original request by decoding the JWT token
-2. Fetches Twitch's GraphQL API to obtain alternative access tokens using different `playerType` values (`embed`, `frontpage`, `site`, `mini`, `embed-legacy`)
-3. Tests each alternative stream URL sequentially, skipping the already-used type
-4. Validates that the alternative stream contains actual content (`#EXTINF` markers) and no ad markers
-5. Returns the clean playlist to the player seamlessly
+A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` requests via `fetch` and `XMLHttpRequest` interception. The system operates in two modes:
+
+**Proactive Mode (Pre-emptive):**
+1. When detecting a playlist request, immediately tries `embed` and `frontpage` player types BEFORE the original request
+2. If a clean stream is found, returns it instantly without ever loading the ad-filled playlist
+3. This prevents ads from appearing even for a split second
+
+**Reactive Mode (Fallback):**
+1. If proactive search fails, proceeds with the original request
+2. Detects which `playerType` was used by decoding the JWT token
+3. Fetches alternative access tokens using remaining player types (`site`, `mini`, `embed-legacy`)
+4. Tests each alternative stream URL sequentially
+5. Validates that the stream contains actual content (`#EXTINF` markers) and no ad markers
 6. If no clean stream is found, applies manual filtering as a last resort
 
-This leverages Twitch's own API to access ad-free streams that are normally reserved for different player contexts. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
+This dual-mode approach leverages Twitch's own API to access ad-free streams while minimizing latency. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
 
 ### Layer 3: Configuration Patching & UI Armor
 The content script operates on two fronts:
@@ -155,8 +162,9 @@ When the extension is active, you'll see these messages in the browser console:
 - `[TwitchCleaner] UI Armor Active` - DOM cleaner is running
 - `[TwitchCleaner] Replacing playerType 'site' with 'frontpage'` - Background script rotating playerType
 - `[StreamFetcher] Initialized` - Alternative Stream Fetcher is ready
-- `[StreamFetcher] Ads detected, searching clean stream...` - Found ads, initiating search
-- `[StreamFetcher] Found clean stream (embed)` - Successfully switched to ad-free stream
+- `[StreamFetcher] Preemptively using clean stream (embed)` - Found clean stream BEFORE loading original (best case)
+- `[StreamFetcher] Ads detected, searching clean stream...` - Found ads in original, initiating search
+- `[StreamFetcher] Found clean stream (frontpage)` - Successfully switched to ad-free stream
 - `[StreamFetcher] No clean stream found, filtering manually...` - Fallback to manual filtering
 
 ## Disclaimer
