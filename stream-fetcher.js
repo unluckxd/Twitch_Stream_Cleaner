@@ -67,9 +67,16 @@
     window.fetch = async function(url, options) {
         if (typeof url === 'string' && url.includes('.m3u8')) {
             if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                const channelMatch = url.match(/\/([^\/]+)\.m3u8/) || url.match(/channel=([^&]+)/);
-                if (channelMatch) {
-                    const channelName = channelMatch[1];
+                // Улучшенное определение имени канала
+                let channelName = null;
+                const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
+                const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
+                
+                if (m3u8Match) channelName = m3u8Match[1];
+                else if (channelParamMatch) channelName = channelParamMatch[1];
+                
+                if (channelName) {
+                    console.log(`[StreamFetcher] 🔍 Detected channel: ${channelName}`);
                     
                     for (const playerType of ['embed', 'frontpage']) {
                         try {
@@ -91,13 +98,16 @@
                                 !testText.includes('SCTE35') && 
                                 !testText.includes('twitch-stitched-ad') &&
                                 testText.includes('#EXTINF')) {
-                                console.log(`[StreamFetcher] Preemptively using clean stream (${playerType})`);
+                                console.log(`[StreamFetcher] ✅ Preemptively using clean stream (${playerType})`);
                                 return new Response(testText, {
                                     status: 200,
                                     headers: testResponse.headers
                                 });
+                            } else {
+                                console.log(`[StreamFetcher] ❌ ${playerType} has ads, trying next...`);
                             }
                         } catch (err) {
+                            console.log(`[StreamFetcher] ⚠️ ${playerType} failed: ${err.message}`);
                         }
                     }
                 }
@@ -106,9 +116,15 @@
             const response = await originalFetch.apply(this, arguments);
             
             if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                const channelMatch = url.match(/\/([^\/]+)\.m3u8/) || url.match(/channel=([^&]+)/);
-                if (channelMatch) {
-                    const channelName = channelMatch[1];
+                // Улучшенное определение имени канала
+                let channelName = null;
+                const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
+                const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
+                
+                if (m3u8Match) channelName = m3u8Match[1];
+                else if (channelParamMatch) channelName = channelParamMatch[1];
+                
+                if (channelName) {
                     const text = await response.clone().text();
                     
                     if (text.includes('stitched-ad') || text.includes('SCTE35') || text.includes('twitch-stitched-ad')) {
@@ -199,7 +215,7 @@
                 if (self.readyState === 4 && self.status === 200) {
                     const text = self.responseText;
                     if (text && (text.includes('stitched-ad') || text.includes('SCTE35'))) {
-                        console.log('[StreamFetcher] XHR: Ads detected in playlist');
+                        console.log('[StreamFetcher] 🚨 XHR: Ads detected in playlist');
                     }
                 }
                 if (originalOnReadyStateChange) {
@@ -210,5 +226,5 @@
         return originalXHRSend.apply(this, args);
     };
     
-    console.log('[StreamFetcher] Initialized');
+    console.log('[StreamFetcher] Initialized (fetch + XHR interceptors active)');
 })();

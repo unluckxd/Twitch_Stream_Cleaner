@@ -153,7 +153,7 @@ function processPlaylist(text) {
   const startTime = performance.now();
   
   if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
-     console.log('[TwitchCleaner] Dropped ad-only playlist');
+     console.log('[TwitchCleaner] Blocked ad-only playlist');
      updateStats(0.1);
      logToUI('Blocked Pre-roll Ad');
      return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
@@ -235,11 +235,19 @@ browser.webRequest.onBeforeRequest.addListener(
       let str = "";
       for (let chunk of chunks) str += decoder.decode(chunk, { stream: true });
       str += decoder.decode();
+      
+      const hasAds = str.includes('stitched-ad') || str.includes('SCTE35') || str.includes('twitch-stitched-ad');
+      if (hasAds) {
+        console.log('[TwitchCleaner] Ads detected in playlist, filtering...');
+      }
 
       try {
         const result = processPlaylist(str);
-        if (!result.includes('#EXTM3U')) filter.write(encoder.encode(str));
-        else filter.write(encoder.encode(result));
+        if (!result.includes('#EXTM3U')) {
+          filter.write(encoder.encode(str));
+        } else {
+          filter.write(encoder.encode(result));
+        }
       } catch (e) {
         console.error('[TwitchCleaner] Error processing playlist:', e);
         filter.write(encoder.encode(str));
