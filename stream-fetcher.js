@@ -12,10 +12,11 @@
     }
     window.twitchAdSolutionsActive = true;
     
-    const BACKUP_PLAYER_TYPES = ['embed', 'frontpage', 'site'];
+    const BACKUP_PLAYER_TYPES = ['embed', 'frontpage', 'site', 'mini', 'embed-legacy'];
     const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
     
     let accessTokenCache = new Map();
+    let usedPlayerTypes = new Set();
     
     async function getAccessToken(channelName, playerType) {
         const cacheKey = `${channelName}_${playerType}`;
@@ -67,16 +68,28 @@
         if (typeof url === 'string' && url.includes('.m3u8')) {
             const response = await originalFetch.apply(this, arguments);
             
-            if (url.includes('/channel/hls/')) {
-                const channelMatch = url.match(/\/([^\/]+)\.m3u8/);
+            if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
+                const channelMatch = url.match(/\/([^\/]+)\.m3u8/) || url.match(/channel=([^&]+)/);
                 if (channelMatch) {
                     const channelName = channelMatch[1];
                     const text = await response.clone().text();
                     
-                    if (text.includes('stitched-ad') || text.includes('SCTE35')) {
+                    if (text.includes('stitched-ad') || text.includes('SCTE35') || text.includes('twitch-stitched-ad')) {
                         console.log('[StreamFetcher] Ads detected, searching clean stream...');
                         
-                        for (const playerType of BACKUP_PLAYER_TYPES) {
+                        const urlParams = new URL(url);
+                        let originalPlayerType = null;
+                        try {
+                            const tokenParam = urlParams.searchParams.get('token');
+                            if (tokenParam) {
+                                const decodedToken = JSON.parse(atob(tokenParam.split('.')[1]));
+                                originalPlayerType = decodedToken.channel_id ? 'site' : null;
+                            }
+                        } catch (e) {}
+                        
+                        const typesToTry = BACKUP_PLAYER_TYPES.filter(type => type !== originalPlayerType);
+                        
+                        for (const playerType of typesToTry) {
                             try {
                                 const tokenData = await getAccessToken(channelName, playerType);
                                 if (!tokenData?.data?.streamPlaybackAccessToken) continue;
@@ -85,25 +98,42 @@
                                 const backupUrl = new URL(url);
                                 backupUrl.searchParams.set('sig', token.signature);
                                 backupUrl.searchParams.set('token', token.value);
+                                backupUrl.searchParams.set('player_type', playerType);
                                 
                                 const backupResponse = await originalFetch(backupUrl.toString());
                                 if (!backupResponse.ok) continue;
                                 
                                 const backupText = await backupResponse.text();
                                 
-                                if (!backupText.includes('stitched-ad') && !backupText.includes('SCTE35')) {
+                                if (!backupText.includes('stitched-ad') && 
+                                    !backupText.includes('SCTE35') && 
+                                    !backupText.includes('twitch-stitched-ad') &&
+                                    backupText.includes('#EXTINF')) {
                                     console.log(`[StreamFetcher] Found clean stream (${playerType})`);
+                                    usedPlayerTypes.add(playerType);
                                     return new Response(backupText, {
                                         status: 200,
                                         headers: backupResponse.headers
                                     });
                                 }
                             } catch (err) {
-                                console.log(`[StreamFetcher] Failed ${playerType}:`, err);
+                                console.log(`[StreamFetcher] Failed ${playerType}:`, err.message);
                             }
                         }
                         
-                        console.log('[StreamFetcher] No clean stream found, using original');
+                        console.log('[StreamFetcher] No clean stream found, filtering manually...');
+                        const filteredText = text.split('\n')
+                            .filter(line => !line.includes('stitched-ad') && 
+                                           !line.includes('SCTE35') && 
+                                           !line.includes('DATERANGE'))
+                            .join('\n');
+                        
+                        if (filteredText.includes('#EXTINF')) {
+                            return new Response(filteredText, {
+                                status: 200,
+                                headers: response.headers
+                            });
+                        }
                     }
                 }
             }

@@ -52,17 +52,22 @@ browser.webRequest.onBeforeRequest.addListener(
           const bodyObj = JSON.parse(body);
           let modified = false;
           
+          const playerTypes = ['embed', 'frontpage', 'site'];
+          const randomPlayerType = playerTypes[Math.floor(Math.random() * playerTypes.length)];
+          
           if (Array.isArray(bodyObj)) {
             bodyObj.forEach(item => {
-              if (item?.variables?.playerType && item.variables.playerType !== 'embed') {
-                console.log(`[TwitchCleaner] Replacing playerType '${item.variables.playerType}' with 'embed'`);
-                item.variables.playerType = 'embed';
+              if (item?.variables?.playerType) {
+                const originalType = item.variables.playerType;
+                item.variables.playerType = randomPlayerType;
+                console.log(`[TwitchCleaner] Replacing playerType '${originalType}' with '${randomPlayerType}'`);
                 modified = true;
               }
             });
-          } else if (bodyObj?.variables?.playerType && bodyObj.variables.playerType !== 'embed') {
-            console.log(`[TwitchCleaner] Replacing playerType '${bodyObj.variables.playerType}' with 'embed'`);
-            bodyObj.variables.playerType = 'embed';
+          } else if (bodyObj?.variables?.playerType) {
+            const originalType = bodyObj.variables.playerType;
+            bodyObj.variables.playerType = randomPlayerType;
+            console.log(`[TwitchCleaner] Replacing playerType '${originalType}' with '${randomPlayerType}'`);
             modified = true;
           }
           

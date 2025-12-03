@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.2.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.1-blue" alt="Version">
 </p>
 
 ---
@@ -23,7 +23,7 @@
 
 * **Three-Layer Protection System:**
     * **Layer 1 - HLS Playlist Cleaner:** Intercepts and strips ad segments from `.m3u8` playlists before they reach the player
-    * **Layer 2 - Alternative Stream Fetcher:** Automatically switches to ad-free streams using alternative player types when ads are detected
+    * **Layer 2 - Alternative Stream Fetcher:** Intelligently switches to ad-free streams using 5 different player types with smart rotation and fallback filtering
     * **Layer 3 - Config Patcher:** Disables ad-related flags in Twitch's player configuration via `JSON.parse` patching
 * **Engineering Dashboard:** A built-in dark-mode UI monitoring real-time metrics:
     * **Segments Stripped:** Exact count of ad segments removed
@@ -42,11 +42,14 @@ The background script intercepts all `.m3u8` playlist requests using the `webReq
 
 ### Layer 2: Alternative Stream Fetcher
 A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` requests via `fetch` interception. When ads are detected in the primary stream:
-1. Fetches Twitch's GraphQL API to obtain alternative access tokens using different `playerType` values (`embed`, `frontpage`, `site`)
-2. Tests each alternative stream URL until finding one without ad markers
-3. Returns the clean playlist to the player seamlessly
+1. Detects which `playerType` was used in the original request by decoding the JWT token
+2. Fetches Twitch's GraphQL API to obtain alternative access tokens using different `playerType` values (`embed`, `frontpage`, `site`, `mini`, `embed-legacy`)
+3. Tests each alternative stream URL sequentially, skipping the already-used type
+4. Validates that the alternative stream contains actual content (`#EXTINF` markers) and no ad markers
+5. Returns the clean playlist to the player seamlessly
+6. If no clean stream is found, applies manual filtering as a last resort
 
-This leverages Twitch's own API to access ad-free streams that are normally reserved for different contexts.
+This leverages Twitch's own API to access ad-free streams that are normally reserved for different player contexts. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
 
 ### Layer 3: Configuration Patching & UI Armor
 The content script operates on two fronts:
@@ -122,7 +125,15 @@ A: Twitch frequently updates their playlist structure and API.
 3. If it persists, check the extension dashboard - if "Avg. Latency" is abnormally high, reload the extension in `about:debugging`
 
 **Q: The extension dashboard shows "0 segments" but I see ads.**  
-A: The Alternative Stream Fetcher (`stream-fetcher.js`) may have found a clean stream before the background script could strip segments. Check the browser console (`F12`) for `[StreamFetcher] ✅ Found clean stream` messages - this means Layer 2 is working correctly.
+A: The Alternative Stream Fetcher (`stream-fetcher.js`) may have found a clean stream before the background script could strip segments. Check the browser console (`F12`) for `[StreamFetcher] Found clean stream` messages - this means Layer 2 is working correctly.
+
+**Q: I still see ads occasionally. Is the extension broken?**  
+A: Twitch constantly updates their ad delivery system. The extension uses multiple strategies:
+1. Random `playerType` rotation to avoid detection patterns
+2. Testing 5 different player types for clean streams
+3. Manual playlist filtering as fallback
+
+If ads persist, try refreshing the page or clearing your browser cache. The extension is most effective on popular channels where alternative streams are available.
 
 **Q: Does this work on Chrome?**  
 A: **No.** Chrome's Manifest V3 removed the blocking capabilities of the `webRequest` API required for real-time HLS manipulation. This extension leverages Firefox's superior Manifest V2 API, which allows synchronous network interception and response modification.
@@ -142,9 +153,11 @@ A: Firefox continues to support Manifest V2 indefinitely. When/if a full migrati
 When the extension is active, you'll see these messages in the browser console:
 - `[TwitchCleaner] Config Patcher Active` - Configuration patching initialized
 - `[TwitchCleaner] UI Armor Active` - DOM cleaner is running
+- `[TwitchCleaner] Replacing playerType 'site' with 'frontpage'` - Background script rotating playerType
 - `[StreamFetcher] Initialized` - Alternative Stream Fetcher is ready
-- `[StreamFetcher] 🚨 Ads detected, searching clean stream...` - Found ads, switching to backup
-- `[StreamFetcher] ✅ Found clean stream (embed)` - Successfully switched to ad-free stream
+- `[StreamFetcher] Ads detected, searching clean stream...` - Found ads, initiating search
+- `[StreamFetcher] Found clean stream (embed)` - Successfully switched to ad-free stream
+- `[StreamFetcher] No clean stream found, filtering manually...` - Fallback to manual filtering
 
 ## Disclaimer
 
