@@ -82,6 +82,37 @@ function injectConfigPatcher() {
   const script = document.createElement('script');
   script.textContent = `
     (function() {
+      const originalFetch = window.fetch;
+      window.fetch = async function(url, options) {
+        if (typeof url === 'string' && url.includes('gql.twitch.tv/gql')) {
+          if (options && options.body) {
+            try {
+              const body = JSON.parse(options.body);
+              const preferredPlayerType = 'embed';
+              
+              if (Array.isArray(body)) {
+                body.forEach(item => {
+                  if (item?.operationName === 'PlaybackAccessToken' && item?.variables?.playerType) {
+                    if (item.variables.playerType !== preferredPlayerType) {
+                      console.log(\`[TwitchCleaner] '\${item.variables.playerType}' → '\${preferredPlayerType}'\`);
+                      item.variables.playerType = preferredPlayerType;
+                    }
+                  }
+                });
+              } else if (body?.operationName === 'PlaybackAccessToken' && body?.variables?.playerType) {
+                if (body.variables.playerType !== preferredPlayerType) {
+                  console.log(\`[TwitchCleaner] '\${body.variables.playerType}' → '\${preferredPlayerType}'\`);
+                  body.variables.playerType = preferredPlayerType;
+                }
+              }
+              
+              options = { ...options, body: JSON.stringify(body) };
+            } catch (e) {}
+          }
+        }
+        return originalFetch.call(this, url, options);
+      };
+      
       const origParse = JSON.parse;
       JSON.parse = function(text) {
         const data = origParse.apply(this, arguments);
