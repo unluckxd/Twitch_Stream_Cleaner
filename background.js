@@ -1,5 +1,5 @@
 /**
- * Twitch Stream Cleaner (Engine v2.5 - Nuclear)
+ * Twitch Stream Cleaner
  * Copyright (c) 2025 Illia Naumenko
  * Licensed under the MIT License.
  */
