@@ -110,6 +110,65 @@ browser.runtime.onMessage.addListener((msg) => {
   }
 });
 
+function analyzeSegmentDurations(segments, hasDiscontinuity) {
+  if (segments.length < 3) return { suspiciousGroups: [], avgDuration: 0, stdDev: 0 };
+  
+  const durations = segments.map(s => s.duration);
+  const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+  const variance = durations.reduce((sum, d) => sum + Math.pow(d - avgDuration, 2), 0) / durations.length;
+  const stdDev = Math.sqrt(variance);
+  
+  const suspiciousGroups = [];
+  let currentGroup = [segments[0]];
+  
+  for (let i = 1; i < segments.length; i++) {
+    const prevDuration = segments[i - 1].duration;
+    const currDuration = segments[i].duration;
+    
+    const threshold = hasDiscontinuity ? 0.2 : 0.1;
+    const minDuration = hasDiscontinuity ? 2 : 5;
+    
+    if (Math.abs(currDuration - prevDuration) < threshold && currDuration > avgDuration + stdDev * 0.5) {
+      currentGroup.push(segments[i]);
+    } else {
+      if (currentGroup.length >= 2 && currentGroup[0].duration >= minDuration) {
+        suspiciousGroups.push([...currentGroup]);
+      }
+      currentGroup = [segments[i]];
+    }
+  }
+  
+  if (currentGroup.length >= 2 && currentGroup[0].duration >= (hasDiscontinuity ? 2 : 5)) {
+    suspiciousGroups.push(currentGroup);
+  }
+  
+  return { suspiciousGroups, avgDuration, stdDev };
+}
+
+function calculateAdProbability(segment, context) {
+  let score = 0;
+  
+  if (segment.duration >= 29 && segment.duration <= 31) score += 0.45;
+  else if (segment.duration >= 14 && segment.duration <= 16) score += 0.35;
+  else if (segment.duration >= 5 && segment.duration <= 7) score += 0.25;
+  
+  if (segment.url.includes('stitched-ad') || segment.url.includes('/ad/')) score += 0.6;
+  if (segment.url.includes('scte35') || segment.url.includes('google_')) score += 0.5;
+  if (segment.url.includes('/commercial') || segment.url.includes('ad_break')) score += 0.5;
+  
+  if (context.hasAdMarkers) score += 0.35;
+  if (context.hasDiscontinuity) score += 0.2;
+  if (context.inSuspiciousGroup) score += 0.3;
+  
+  if (context.avgDuration > 0 && context.stdDev > 0) {
+    const deviation = Math.abs(segment.duration - context.avgDuration) / (context.stdDev + 0.01);
+    if (deviation > 2) score += 0.2;
+    else if (deviation > 1.5) score += 0.1;
+  }
+  
+  return Math.min(score, 1.0);
+}
+
 function processPlaylist(text) {
   if (!IS_ENABLED) return text;
   
@@ -127,6 +186,38 @@ function processPlaylist(text) {
   
   let isAdSegment = false;
   let adBlockedSegments = 0;
+  
+  const segments = [];
+  let tempDuration = 0;
+  let hasAdMarkers = text.includes('stitched-ad') || text.includes('SCTE35');
+  let hasDiscontinuity = text.includes('#EXT-X-DISCONTINUITY');
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('#EXTINF:')) {
+      const match = line.match(/#EXTINF:([\d.]+)/);
+      if (match) tempDuration = parseFloat(match[1]);
+    } else if (line && !line.startsWith('#') && tempDuration > 0) {
+      segments.push({ duration: tempDuration, url: line, lineIndex: i });
+      tempDuration = 0;
+    }
+  }
+  
+  const analysis = analyzeSegmentDurations(segments, hasDiscontinuity);
+  const suspiciousSet = new Set();
+  
+  analysis.suspiciousGroups.forEach(group => {
+    group.forEach(seg => suspiciousSet.add(seg.lineIndex));
+  });
+  
+  console.log(`[TwitchCleaner] Analysis: ${segments.length} segments, ${analysis.suspiciousGroups.length} suspicious groups, avg=${analysis.avgDuration?.toFixed(2)}s, σ=${analysis.stdDev?.toFixed(2)}s${hasDiscontinuity ? ' [DISCONTINUITY]' : ''}${hasAdMarkers ? ' [AD_MARKERS]' : ''}`);
+  
+  isAdSegment = false;
+  tempDuration = 0;
+  let currentUrl = '';
+
+  isAdSegment = false;
+  tempDuration = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -146,8 +237,17 @@ function processPlaylist(text) {
       if (trimmed.includes('PROGRAM-DATE-TIME') && isAdSegment) {
         isAdSegment = false;
       }
+      
+      if (trimmed === '#EXT-X-DISCONTINUITY' && hasAdMarkers) {
+        console.log('[TwitchCleaner] DISCONTINUITY marker detected - potential ad boundary');
+      }
 
       if (isAdSegment) continue;
+      
+      if (trimmed.startsWith('#EXTINF:')) {
+        const match = trimmed.match(/#EXTINF:([\d.]+)/);
+        if (match) tempDuration = parseFloat(match[1]);
+      }
       
       if (!isAdSegment) cleanLines.push(line);
       continue;
@@ -156,6 +256,33 @@ function processPlaylist(text) {
     if (isAdSegment) {
       if (trimmed.startsWith('#EXTINF')) adBlockedSegments++;
       continue; 
+    }
+
+    if (trimmed && !trimmed.startsWith('#')) {
+      const segment = { duration: tempDuration, url: trimmed };
+      const context = {
+        hasAdMarkers: hasAdMarkers,
+        hasDiscontinuity: hasDiscontinuity,
+        inSuspiciousGroup: suspiciousSet.has(i),
+        avgDuration: analysis.avgDuration,
+        stdDev: analysis.stdDev
+      };
+      
+      const adProbability = calculateAdProbability(segment, context);
+      
+      if (adProbability >= 0.5) {
+        if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1].includes('#EXTINF')) {
+          cleanLines.pop();
+        }
+        adBlockedSegments++;
+        console.log(`[TwitchCleaner] BLOCKED: P(ad)=${adProbability.toFixed(2)} dur=${tempDuration}s url=${trimmed.substring(0, 60)}...`);
+        tempDuration = 0;
+        continue;
+      } else if (adProbability > 0.3) {
+        console.log(`[TwitchCleaner] Suspicious: P(ad)=${adProbability.toFixed(2)} dur=${tempDuration}s`);
+      }
+      
+      tempDuration = 0;
     }
 
     if (trimmed.includes('stitched-ad') || 
