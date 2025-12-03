@@ -76,13 +76,13 @@
                     if (Array.isArray(body)) {
                         body.forEach(item => {
                             if (item?.variables?.playerType && item.variables.playerType !== preferredPlayerType) {
-                                console.log(`[StreamFetcher] 🔄 Replacing playerType '${item.variables.playerType}' with '${preferredPlayerType}'`);
+                                console.log(`[StreamFetcher] Replacing playerType '${item.variables.playerType}' with '${preferredPlayerType}'`);
                                 item.variables.playerType = preferredPlayerType;
                                 modified = true;
                             }
                         });
                     } else if (body?.variables?.playerType && body.variables.playerType !== preferredPlayerType) {
-                        console.log(`[StreamFetcher] 🔄 Replacing playerType '${body.variables.playerType}' with '${preferredPlayerType}'`);
+                        console.log(`[StreamFetcher] Replacing playerType '${body.variables.playerType}' with '${preferredPlayerType}'`);
                         body.variables.playerType = preferredPlayerType;
                         modified = true;
                     }

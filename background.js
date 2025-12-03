@@ -126,6 +126,7 @@ function processPlaylist(text) {
   const cleanLines = [];
   
   let isAdSegment = false;
+  let skipNextSegment = false;
   let adBlockedSegments = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -136,9 +137,12 @@ function processPlaylist(text) {
       
       if (trimmed.includes('DATERANGE')) {
          if (trimmed.includes('stitched-ad') || 
-             trimmed.includes('class="twitch-stitched-ad"') || 
+             trimmed.includes('class=\"twitch-stitched-ad\"') || 
+             trimmed.includes('SCTE35-OUT') ||
+             trimmed.includes('SCTE35-IN') ||
              trimmed.includes('SCTE35')) {
             isAdSegment = true;
+            adBlockedSegments++;
             continue;
          }
       }
@@ -149,24 +153,30 @@ function processPlaylist(text) {
 
       if (isAdSegment) continue;
       
-      if (!isAdSegment) cleanLines.push(line);
+      cleanLines.push(line);
       continue;
     }
 
     if (isAdSegment) {
-      if (trimmed.startsWith('#EXTINF')) adBlockedSegments++;
+      if (trimmed.startsWith('#EXTINF')) skipNextSegment = true;
       continue; 
     }
 
     if (trimmed.includes('stitched-ad') || 
         trimmed.includes('scte35') || 
-        trimmed.includes('/v1/segment/ad/') || 
+        trimmed.includes('/v1/segment/ad/') ||
+        trimmed.includes('-ad-') ||
         trimmed.includes('google_')) {
-       if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1].startsWith('#EXTINF')) {
+       if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1].trim().startsWith('#EXTINF')) {
           cleanLines.pop(); 
           adBlockedSegments++;
        }
        continue;
+    }
+
+    if (skipNextSegment && !trimmed.startsWith('#')) {
+      skipNextSegment = false;
+      continue;
     }
 
     cleanLines.push(line);
@@ -176,11 +186,20 @@ function processPlaylist(text) {
     const blockTime = performance.now() - startTime;
     let timeDisplay = blockTime < 0.005 ? "< 0.01" : blockTime.toFixed(3);
     
+    console.log(`[TwitchCleaner] Removed ${adBlockedSegments} ad segments in ${timeDisplay}ms`);
     updateStats(blockTime);
     logToUI(`Removed ${adBlockedSegments} segments (${timeDisplay}ms)`);
   }
 
-  return cleanLines.join('\n');
+  let finalClean = cleanLines.join('\n');
+  
+  finalClean = finalClean.replace(/.*stitched-ad.*/gi, '');
+  finalClean = finalClean.replace(/.*SCTE35.*/gi, '');
+  finalClean = finalClean.replace(/.*\/v1\/segment\/ad\/.*/gi, '');
+  
+  finalClean = finalClean.replace(/\n\n+/g, '\n');
+  
+  return finalClean;
 }
 
 browser.webRequest.onBeforeRequest.addListener(
@@ -205,7 +224,19 @@ browser.webRequest.onBeforeRequest.addListener(
       }
 
       try {
-        const result = processPlaylist(str);
+        let result = processPlaylist(str);
+        
+        if (hasAds && result !== str) {
+          const segmentCount = (result.match(/#EXTINF/g) || []).length;
+          
+          if (segmentCount === 0 && hasAds) {
+            console.log('[TwitchCleaner] All segments were ads, returning empty playlist');
+            result = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n`;
+          } else {
+            console.log(`[TwitchCleaner] Playlist cleaned: ${segmentCount} segments remaining`);
+          }
+        }
+        
         if (!result.includes('#EXTM3U')) {
           filter.write(encoder.encode(str));
         } else {
