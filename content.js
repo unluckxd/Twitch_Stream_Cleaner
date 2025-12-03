@@ -69,6 +69,15 @@ function injectStyles() {
   (document.head || document.documentElement).appendChild(style);
 }
 
+function injectStreamFetcher() {
+  const script = document.createElement('script');
+  script.src = browser.runtime.getURL('stream-fetcher.js');
+  script.onload = function() {
+    this.remove();
+  };
+  (document.head || document.documentElement).appendChild(script);
+}
+
 function injectConfigPatcher() {
   const script = document.createElement('script');
   script.textContent = `
@@ -84,6 +93,9 @@ function injectConfigPatcher() {
           
           if (data.surestream) data.surestream = false;
           if (data.csai) data.csai = false;
+          
+          if (data.prerollEnabled) data.prerollEnabled = false;
+          if (data.midrollEnabled) data.midrollEnabled = false;
         }
         return data;
       };
@@ -155,6 +167,7 @@ function nukeAds() {
 function init() {
   browser.storage.local.get(['isEnabled'], (data) => {
     if (data.isEnabled !== false) {
+      injectStreamFetcher();
       injectStyles();
       injectConfigPatcher();
       setInterval(nukeAds, 1000);

@@ -1,14 +1,16 @@
 {
   "manifest_version": 2,
   "name": "Twitch Stream Cleaner",
-  "version": "2.1.5",
+  "version": "2.2.0",
   "description": "Watch streams, not ads.",
   "permissions": [
     "webRequest",
     "webRequestBlocking",
     "storage",
     "*://*.twitch.tv/*",
-    "*://*.ttvnw.net/*"
+    "*://*.ttvnw.net/*",
+    "*://gql.twitch.tv/*",
+    "*://usher.ttvnw.net/*"
   ],
   "browser_action": {
     "default_icon": {
@@ -28,6 +30,7 @@
       "run_at": "document_start"
     }
   ],
+  "web_accessible_resources": ["stream-fetcher.js"],
   "icons": {
     "48": "icon-48.png",
     "96": "icon-96.png"

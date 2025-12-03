@@ -46,6 +46,38 @@ browser.webRequest.onBeforeRequest.addListener(
         console.log('[TwitchCleaner] Blocked Ad GQL Request');
         return { cancel: true };
       }
+      
+      if (body.includes("PlaybackAccessToken")) {
+        try {
+          const bodyObj = JSON.parse(body);
+          let modified = false;
+          
+          if (Array.isArray(bodyObj)) {
+            bodyObj.forEach(item => {
+              if (item?.variables?.playerType && item.variables.playerType !== 'embed') {
+                console.log(`[TwitchCleaner] Replacing playerType '${item.variables.playerType}' with 'embed'`);
+                item.variables.playerType = 'embed';
+                modified = true;
+              }
+            });
+          } else if (bodyObj?.variables?.playerType && bodyObj.variables.playerType !== 'embed') {
+            console.log(`[TwitchCleaner] Replacing playerType '${bodyObj.variables.playerType}' with 'embed'`);
+            bodyObj.variables.playerType = 'embed';
+            modified = true;
+          }
+          
+          if (modified) {
+            const newBody = JSON.stringify(bodyObj);
+            return {
+              requestBody: {
+                raw: [{ bytes: new TextEncoder().encode(newBody).buffer }]
+              }
+            };
+          }
+        } catch (err) {
+          console.error('[TwitchCleaner] Failed to modify GQL body:', err);
+        }
+      }
     } catch(e) {}
     
     return {};
@@ -204,6 +236,7 @@ browser.webRequest.onBeforeRequest.addListener(
         if (!result.includes('#EXTM3U')) filter.write(encoder.encode(str));
         else filter.write(encoder.encode(result));
       } catch (e) {
+        console.error('[TwitchCleaner] Error processing playlist:', e);
         filter.write(encoder.encode(str));
       }
       filter.close();
