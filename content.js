@@ -11,6 +11,7 @@ const CSS_HIDE = `
   [data-a-target="video-ad-countdown"],
   [data-a-target="player-overlay-ad-slate"],
   .commercial-break, .tw-animated-ad,
+  .celebration__overlay,
   
   #player-overlay-0,
   div[class*="PushdownSDA"],

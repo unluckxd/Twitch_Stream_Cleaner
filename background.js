@@ -1,32 +1,57 @@
 /**
- * Twitch Stream Cleaner
+ * Twitch Stream Cleaner (Engine v2.5 - Nuclear)
  * Copyright (c) 2025 Illia Naumenko
  * Licensed under the MIT License.
  */
 console.log('[TwitchCleaner] Background Service Started.');
 
-const EXTERNAL_TRACKERS = [
+const BLOCK_PATTERNS = [
   "*://*.scorecardresearch.com/*",
   "*://*.amazon-adsystem.com/*",
   "*://*.imrworldwide.com/*",
   "*://*.google-analytics.com/*",
   "*://*.doubleclick.net/*",
-  "*://*.twitch.tv/*ads/v1/ad-request*"
-];
-
-const AD_SCRIPTS = [
+  
+  "*://*.twitch.tv/*ads/v1/ad-request*",
+  "*://*.twitch.tv/*/commercial",
+  "*://*.twitch.tv/*ad_break*",
+  
   "*://static.twitchcdn.net/assets/video-ad*.js*",
   "*://*.twitchcdn.net/*video-ad*.js*",
-  "*://*.twitchcdn.net/*commercial*.js*",
-  "*://*.twitch.tv/*/commercial*",
-  "*://video-edge-*.twitch.tv/*/commercial*",
   "*://supervisor.ext-twitch.tv/*"
 ];
 
 browser.webRequest.onBeforeRequest.addListener(
-  (details) => { return { cancel: true }; },
-  { urls: [...EXTERNAL_TRACKERS, ...AD_SCRIPTS] },
+  (details) => { 
+    if (details.url.includes('.m3u8') || details.url.includes('.ts') || details.url.includes('.mp4')) return {};
+    
+    return { cancel: true }; 
+  },
+  { urls: BLOCK_PATTERNS },
   ["blocking"]
+);
+
+browser.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (!details.requestBody || !details.requestBody.raw) return {};
+    
+    try {
+      const enc = new TextDecoder("utf-8");
+      const body = enc.decode(details.requestBody.raw[0].bytes);
+      
+      if (body.includes("AdRequest") || 
+          body.includes("VideoAd") || 
+          body.includes("Commercial") ||
+          body.includes("AdBreak")) {
+        console.log('[TwitchCleaner] Blocked Ad GQL Request');
+        return { cancel: true };
+      }
+    } catch(e) {}
+    
+    return {};
+  },
+  { urls: ["*://gql.twitch.tv/gql"] },
+  ["blocking", "requestBody"]
 );
 
 let IS_ENABLED = true;
@@ -92,6 +117,8 @@ function processPlaylist(text) {
   
   if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
      console.log('[TwitchCleaner] Dropped ad-only playlist');
+     updateStats(0.1);
+     logToUI('Blocked Pre-roll Ad');
      return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
   }
 
@@ -107,34 +134,38 @@ function processPlaylist(text) {
 
     if (trimmed.startsWith('#EXTM3U') || trimmed.startsWith('#EXT-X-')) {
       
-      if (trimmed.includes('DATERANGE') && (trimmed.includes('stitched-ad') || trimmed.includes('class="twitch-stitched-ad"'))) {
-        isAdSegment = true;
-        continue;
+      if (trimmed.includes('DATERANGE')) {
+         if (trimmed.includes('stitched-ad') || 
+             trimmed.includes('class="twitch-stitched-ad"') || 
+             trimmed.includes('SCTE35')) {
+            isAdSegment = true;
+            continue;
+         }
       }
       
       if (trimmed.includes('PROGRAM-DATE-TIME') && isAdSegment) {
         isAdSegment = false;
       }
 
-      if (isAdSegment && trimmed.includes('DISCONTINUITY')) {
-        continue;
-      }
+      if (isAdSegment) continue;
       
       if (!isAdSegment) cleanLines.push(line);
       continue;
     }
 
     if (isAdSegment) {
-      if (trimmed.startsWith('#EXTINF') || (!trimmed.startsWith('#') && trimmed.length > 0)) {
-         if (trimmed.startsWith('#EXTINF')) adBlockedSegments++;
-         continue; 
-      }
+      if (trimmed.startsWith('#EXTINF')) adBlockedSegments++;
+      continue; 
     }
 
     if (trimmed.includes('stitched-ad') || 
         trimmed.includes('scte35') || 
         trimmed.includes('/v1/segment/ad/') || 
         trimmed.includes('google_')) {
+       if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1].startsWith('#EXTINF')) {
+          cleanLines.pop(); 
+          adBlockedSegments++;
+       }
        continue;
     }
 
@@ -147,7 +178,6 @@ function processPlaylist(text) {
     
     updateStats(blockTime);
     logToUI(`Removed ${adBlockedSegments} segments (${timeDisplay}ms)`);
-    console.log(`[TwitchCleaner] Cleaned ${adBlockedSegments} segs in ${timeDisplay}ms`);
   }
 
   return cleanLines.join('\n');
