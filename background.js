@@ -110,6 +110,25 @@ browser.runtime.onMessage.addListener((msg) => {
   }
 });
 
+const adPlaylistCache = new Map();
+const AD_RETRY_LIMIT = 3;
+const AD_RETRY_DELAY = 2000;
+
+function isAdPlaylist(text) {
+  const hasDiscontinuity = text.includes('#EXT-X-DISCONTINUITY');
+  const hasAdMarkers = text.includes('stitched-ad') || text.includes('SCTE35');
+  const lines = text.split('\n');
+  
+  if (hasDiscontinuity && hasAdMarkers) {
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+      if (lines[i].trim() === '#EXT-X-DISCONTINUITY') {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function processPlaylist(text) {
   if (!IS_ENABLED) return text;
   
@@ -120,6 +139,19 @@ function processPlaylist(text) {
      updateStats(0.1);
      logToUI('Blocked Pre-roll Ad');
      return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
+  }
+  
+  if (isAdPlaylist(text)) {
+    console.log('[TwitchCleaner] Pre-roll ad detected - showing placeholder');
+    logToUI('Skipping Pre-roll Ad...');
+    updateStats(0.5);
+    return `#EXTM3U
+    #EXT-X-VERSION:3
+    #EXT-X-TARGETDURATION:2
+    #EXT-X-MEDIA-SEQUENCE:1
+    #EXTINF:2.0,
+    data:text/plain;base64,
+    #EXT-X-ENDLIST`;
   }
 
   const lines = text.split('\n');
