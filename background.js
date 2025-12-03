@@ -13,9 +13,31 @@ const EXTERNAL_TRACKERS = [
   "*://*.doubleclick.net/*"
 ];
 
+const AD_SCRIPTS = [
+  "*://static.twitchcdn.net/assets/video-ad*.js*",
+  "*://static.twitchcdn.net/assets/amazon-ivs-player*.js*",
+  "*://*.twitchcdn.net/*video-ad*.js*",
+  "*://*.twitchcdn.net/*commercial*.js*",
+  "*://*.twitch.tv/*/commercial*",
+  "*://video-edge-*.twitch.tv/*/commercial*",
+  "*://supervisor.ext-twitch.tv/*"
+];
+
 browser.webRequest.onBeforeRequest.addListener(
-  (details) => { return { cancel: true }; },
+  (details) => { 
+    console.log('[TwitchCleaner] Blocked tracker:', details.url);
+    return { cancel: true }; 
+  },
   { urls: EXTERNAL_TRACKERS },
+  ["blocking"]
+);
+
+browser.webRequest.onBeforeRequest.addListener(
+  (details) => { 
+    console.log('[TwitchCleaner] Blocked ad script:', details.url);
+    return { cancel: true }; 
+  },
+  { urls: AD_SCRIPTS },
   ["blocking"]
 );
 
@@ -88,11 +110,11 @@ function processPlaylist(text) {
     logToUI('Blocked ad-only playlist');
     
     return `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:2
-#EXT-X-MEDIA-SEQUENCE:0
-#EXTINF:2.0,
-#EXT-X-ENDLIST`;
+    #EXT-X-VERSION:3
+    #EXT-X-TARGETDURATION:2
+    #EXT-X-MEDIA-SEQUENCE:0
+    #EXTINF:2.0,
+    #EXT-X-ENDLIST`;
   }
   
   const lines = text.split('\n');
@@ -101,6 +123,7 @@ function processPlaylist(text) {
   let isAdSegment = false;
   let adBlockedSegments = 0;
   let segmentsSkipped = 0;
+  let skipNext = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -109,48 +132,49 @@ function processPlaylist(text) {
     if (trimmed.startsWith('#EXTM3U') || 
         trimmed.startsWith('#EXT-X-VERSION') ||
         trimmed.startsWith('#EXT-X-TARGETDURATION') ||
-        trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE')) {
+        trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE') ||
+        trimmed.startsWith('#EXT-X-ENDLIST')) {
       cleanLines.push(line);
       continue;
     }
 
-    if (trimmed.includes('#EXT-X-DATERANGE') && 
-        (trimmed.includes('CLASS="twitch-stitched-ad"') || trimmed.includes('SCTE35'))) {
-      isAdSegment = true;
-      adBlockedSegments++;
-      continue;
+    if (trimmed.includes('#EXT-X-DATERANGE')) {
+      if (trimmed.includes('CLASS="twitch-stitched-ad"') || 
+          trimmed.includes('SCTE35-OUT') || 
+          trimmed.includes('SCTE35')) {
+        isAdSegment = true;
+        adBlockedSegments++;
+        continue;
+      }
+      if (isAdSegment && !trimmed.includes('stitched-ad') && !trimmed.includes('SCTE35')) {
+        isAdSegment = false;
+      }
     }
 
     if (isAdSegment) {
-      if (trimmed.startsWith('#EXT-X-DATERANGE') && !trimmed.includes('stitched-ad') && !trimmed.includes('SCTE35')) {
-        isAdSegment = false;
-        cleanLines.push(line);
-        continue;
-      }
-      
       if (trimmed.startsWith('#EXTINF')) {
         segmentsSkipped++;
-        if (i + 1 < lines.length) i++;
+        skipNext = true;
         continue;
       }
       
-      if (trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME')) {
+      if (skipNext) {
+        skipNext = false;
         continue;
       }
       
-      if (trimmed.startsWith('http') || trimmed.match(/^[a-zA-Z0-9_-]+\.ts$/)) {
-        continue;
-      }
-      
-      if (trimmed.startsWith('#EXT-X-DISCONTINUITY')) {
+      if (trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') ||
+          trimmed.startsWith('#EXT-X-DISCONTINUITY') ||
+          trimmed.startsWith('http') ||
+          trimmed.match(/^[a-zA-Z0-9_-]+\.ts$/)) {
         continue;
       }
       
       continue;
     }
 
-    if (trimmed.includes('SCTE35')) {
-       continue;
+    if (trimmed.includes('SCTE35') || trimmed.includes('stitched-ad')) {
+      continue;
     }
 
     cleanLines.push(line);

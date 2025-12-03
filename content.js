@@ -35,7 +35,14 @@ const CSS_HIDE = `
   
   div[data-a-target="player-overlay-content-gate"],
   
-  .extension-view__iframe-wrapper {
+  .extension-view__iframe-wrapper,
+  .extensions-video-overlay-size-container,
+  .extensions-dock__layout,
+  .extensions-notifications,
+  .extensions-info-balloon__close-button,
+  div[class*="extensions"],
+  iframe[src*="supervisor.ext-twitch.tv"],
+  iframe[src*="extensions-discovery"] {
     display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
@@ -96,7 +103,13 @@ function nukeAds() {
     '[data-test-selector="sda-container"]',
     '.stream-display-ad__wrapper',
     '#stream-lowerthird',
-    '[data-a-target="outstream-ax-overlay"]'
+    '[data-a-target="outstream-ax-overlay"]',
+    '.extensions-video-overlay-size-container',
+    '.extensions-dock__layout',
+    '.extensions-notifications',
+    'iframe[src*="supervisor.ext-twitch.tv"]',
+    'iframe[src*="extensions-discovery"]',
+    '[class*="extensions-"]'
   ];
   
   selectors.forEach(sel => {
@@ -120,9 +133,10 @@ function nukeAds() {
   try {
      if (window.AmazonVideoAds) window.AmazonVideoAds = undefined;
      if (window.twitchAds) window.twitchAds = undefined;
+     if (window.Twitch && window.Twitch.ext) window.Twitch.ext = undefined;
   } catch(e) {}
   
-  const iframes = document.querySelectorAll('iframe[src*="ads"]');
+  const iframes = document.querySelectorAll('iframe[src*="ads"], iframe[src*="amazon-adsystem"], iframe[src*="doubleclick"]');
   if (iframes.length > 0) {
     const iframeBlockId = `iframe-ads-${iframes.length}`;
     currentBlockedElements.add(iframeBlockId);
