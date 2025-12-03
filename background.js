@@ -10,12 +10,12 @@ const EXTERNAL_TRACKERS = [
   "*://*.amazon-adsystem.com/*",
   "*://*.imrworldwide.com/*",
   "*://*.google-analytics.com/*",
-  "*://*.doubleclick.net/*"
+  "*://*.doubleclick.net/*",
+  "*://*.twitch.tv/*ads/v1/ad-request*"
 ];
 
 const AD_SCRIPTS = [
   "*://static.twitchcdn.net/assets/video-ad*.js*",
-  "*://static.twitchcdn.net/assets/amazon-ivs-player*.js*",
   "*://*.twitchcdn.net/*video-ad*.js*",
   "*://*.twitchcdn.net/*commercial*.js*",
   "*://*.twitch.tv/*/commercial*",
@@ -24,20 +24,8 @@ const AD_SCRIPTS = [
 ];
 
 browser.webRequest.onBeforeRequest.addListener(
-  (details) => { 
-    console.log('[TwitchCleaner] Blocked tracker:', details.url);
-    return { cancel: true }; 
-  },
-  { urls: EXTERNAL_TRACKERS },
-  ["blocking"]
-);
-
-browser.webRequest.onBeforeRequest.addListener(
-  (details) => { 
-    console.log('[TwitchCleaner] Blocked ad script:', details.url);
-    return { cancel: true }; 
-  },
-  { urls: AD_SCRIPTS },
+  (details) => { return { cancel: true }; },
+  { urls: [...EXTERNAL_TRACKERS, ...AD_SCRIPTS] },
   ["blocking"]
 );
 
@@ -50,10 +38,8 @@ browser.storage.local.get(['isEnabled', 'blockedCount', 'logs', 'avgBlockTime'],
   IS_ENABLED = data.isEnabled !== false;
   BLOCKED_COUNT = data.blockedCount || 0;
   if (data.logs) LOGS = data.logs;
-  if (data.avgBlockTime) {
-    BLOCK_TIMES = [data.avgBlockTime];
-  }
-  console.log('[TwitchCleaner] Stats loaded:', { count: BLOCKED_COUNT, enabled: IS_ENABLED });
+  if (data.avgBlockTime) BLOCK_TIMES = [data.avgBlockTime];
+  console.log('[TwitchCleaner] Stats loaded:', { count: BLOCKED_COUNT });
 });
 
 function logToUI(text) {
@@ -74,107 +60,82 @@ function updateStats(blockTime = 0) {
     ? BLOCK_TIMES.reduce((a, b) => a + b, 0) / BLOCK_TIMES.length 
     : 0;
   
-  const formattedAvgTime = parseFloat(avgTime.toFixed(3));
-  
-  browser.storage.local.set({ blockedCount: BLOCKED_COUNT, avgBlockTime: formattedAvgTime });
-  browser.runtime.sendMessage({ type: 'UPDATE_STATS', count: BLOCKED_COUNT, avgTime: formattedAvgTime }).catch(() => {});
+  browser.storage.local.set({ blockedCount: BLOCKED_COUNT, avgBlockTime: parseFloat(avgTime.toFixed(3)) });
+  browser.runtime.sendMessage({ 
+    type: 'UPDATE_STATS', 
+    count: BLOCKED_COUNT, 
+    latency: avgTime.toFixed(3) 
+  }).catch(() => {});
 }
 
 browser.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'SET_STATE') {
     IS_ENABLED = msg.isEnabled;
-    logToUI(IS_ENABLED ? 'System Active' : 'System Paused');
+    logToUI(IS_ENABLED ? 'Engine Active' : 'Engine Paused');
   }
-
   if (msg.type === 'CLEAR_LOGS') {
     LOGS = [];
-    browser.storage.local.set({ logs: [] });
+    BLOCKED_COUNT = 0;
+    browser.storage.local.set({ logs: [], blockedCount: 0 });
+    browser.runtime.sendMessage({ type: 'UPDATE_STATS', count: 0, latency: 0 }).catch(() => {});
   }
-  
   if (msg.type === 'AD_BLOCKED_UI') {
     updateStats(msg.blockTime || 0);
-    logToUI('UI ad element removed');
+    logToUI('UI Overlay Removed');
   }
 });
-
 
 function processPlaylist(text) {
   if (!IS_ENABLED) return text;
   
   const startTime = performance.now();
   
-  if (text.includes('CLASS="twitch-stitched-ad"') && !text.includes('#EXTINF')) {
-    console.log('[TwitchCleaner] AD-ONLY playlist - returning empty response');
-    const blockTime = performance.now() - startTime;
-    updateStats(blockTime);
-    logToUI('Blocked ad-only playlist');
-    
-    return `#EXTM3U
-    #EXT-X-VERSION:3
-    #EXT-X-TARGETDURATION:2
-    #EXT-X-MEDIA-SEQUENCE:0
-    #EXTINF:2.0,
-    #EXT-X-ENDLIST`;
+  if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
+     console.log('[TwitchCleaner] Dropped ad-only playlist');
+     return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
   }
-  
+
   const lines = text.split('\n');
   const cleanLines = [];
   
   let isAdSegment = false;
   let adBlockedSegments = 0;
-  let segmentsSkipped = 0;
-  let skipNext = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    if (trimmed.startsWith('#EXTM3U') || 
-        trimmed.startsWith('#EXT-X-VERSION') ||
-        trimmed.startsWith('#EXT-X-TARGETDURATION') ||
-        trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE') ||
-        trimmed.startsWith('#EXT-X-ENDLIST')) {
-      cleanLines.push(line);
-      continue;
-    }
-
-    if (trimmed.includes('#EXT-X-DATERANGE')) {
-      if (trimmed.includes('CLASS="twitch-stitched-ad"') || 
-          trimmed.includes('SCTE35-OUT') || 
-          trimmed.includes('SCTE35')) {
+    if (trimmed.startsWith('#EXTM3U') || trimmed.startsWith('#EXT-X-')) {
+      
+      if (trimmed.includes('DATERANGE') && (trimmed.includes('stitched-ad') || trimmed.includes('class="twitch-stitched-ad"'))) {
         isAdSegment = true;
-        adBlockedSegments++;
         continue;
       }
-      if (isAdSegment && !trimmed.includes('stitched-ad') && !trimmed.includes('SCTE35')) {
+      
+      if (trimmed.includes('PROGRAM-DATE-TIME') && isAdSegment) {
         isAdSegment = false;
       }
+
+      if (isAdSegment && trimmed.includes('DISCONTINUITY')) {
+        continue;
+      }
+      
+      if (!isAdSegment) cleanLines.push(line);
+      continue;
     }
 
     if (isAdSegment) {
-      if (trimmed.startsWith('#EXTINF')) {
-        segmentsSkipped++;
-        skipNext = true;
-        continue;
+      if (trimmed.startsWith('#EXTINF') || (!trimmed.startsWith('#') && trimmed.length > 0)) {
+         if (trimmed.startsWith('#EXTINF')) adBlockedSegments++;
+         continue; 
       }
-      
-      if (skipNext) {
-        skipNext = false;
-        continue;
-      }
-      
-      if (trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') ||
-          trimmed.startsWith('#EXT-X-DISCONTINUITY') ||
-          trimmed.startsWith('http') ||
-          trimmed.match(/^[a-zA-Z0-9_-]+\.ts$/)) {
-        continue;
-      }
-      
-      continue;
     }
 
-    if (trimmed.includes('SCTE35') || trimmed.includes('stitched-ad')) {
-      continue;
+    if (trimmed.includes('stitched-ad') || 
+        trimmed.includes('scte35') || 
+        trimmed.includes('/v1/segment/ad/') || 
+        trimmed.includes('google_')) {
+       continue;
     }
 
     cleanLines.push(line);
@@ -182,9 +143,11 @@ function processPlaylist(text) {
 
   if (adBlockedSegments > 0) {
     const blockTime = performance.now() - startTime;
-    console.log(`[TwitchCleaner] Blocked ${adBlockedSegments} ad blocks, ${segmentsSkipped} segments in ${blockTime.toFixed(2)}ms`);
+    let timeDisplay = blockTime < 0.005 ? "< 0.01" : blockTime.toFixed(3);
+    
     updateStats(blockTime);
-    logToUI(`Blocked ${adBlockedSegments} ad blocks (${segmentsSkipped} segments)`);
+    logToUI(`Removed ${adBlockedSegments} segments (${timeDisplay}ms)`);
+    console.log(`[TwitchCleaner] Cleaned ${adBlockedSegments} segs in ${timeDisplay}ms`);
   }
 
   return cleanLines.join('\n');
@@ -205,30 +168,18 @@ browser.webRequest.onBeforeRequest.addListener(
       let str = "";
       for (let chunk of chunks) str += decoder.decode(chunk, { stream: true });
       str += decoder.decode();
-      
-      if (str.includes('CLASS="twitch-stitched-ad"') && !str.includes('#EXTINF')) {
-        console.log('[TwitchCleaner] Blocking ad-only playlist');
-        updateStats(0);
-        logToUI('Blocked ad-only playlist');
-        filter.disconnect();
-        return;
-      }
 
       try {
         const result = processPlaylist(str);
-        filter.write(encoder.encode(result));
+        if (!result.includes('#EXTM3U')) filter.write(encoder.encode(str));
+        else filter.write(encoder.encode(result));
       } catch (e) {
-        console.error('[TwitchCleaner] Error:', e);
         filter.write(encoder.encode(str));
       }
       filter.close();
     };
     return {};
   },
-  { urls: [
-      "*://video-weaver.*.hls.ttvnw.net/*",
-      "*://*.ttvnw.net/*"
-    ] 
-  },
+  { urls: ["*://*.ttvnw.net/*"] },
   ["blocking"]
 );
