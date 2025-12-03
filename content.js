@@ -30,9 +30,13 @@ const CSS_HIDE = `
   #stream-lowerthird,
   
   [data-a-target="outstream-ax-overlay"],
+  [data-a-target="ax-overlay"],
   
   .video-player__overlay [data-a-target="player-overlay-text-ad"],
   .video-player__overlay div[class*="Layout-sc-"] > div[style*="z-index: 2"],
+  
+  .InjectLayout-sc-1i43xsx-0.persistent-player[data-a-player-state="ad-playing"],
+  .InjectLayout-sc-1i43xsx-0.celebration__overlay,
   
   div[data-a-target="player-overlay-content-gate"],
   
@@ -77,10 +81,19 @@ function injectConfigPatcher() {
           if (data.stitched) data.stitched = false;
           if (data.show_ads) data.show_ads = false;
           if (data.disable_ads) data.disable_ads = true;
+          
+          if (data.surestream) data.surestream = false;
+          if (data.csai) data.csai = false;
         }
         return data;
       };
-      console.log('[TwitchCleaner] JSON.parse patched in page context');
+
+      Object.defineProperties(window, {
+        'AmazonVideoAds': { get: () => undefined, set: () => {} },
+        'twitchAds': { get: () => undefined, set: () => {} }
+      });
+      
+      console.log('[TwitchCleaner] Config Patcher Active');
     })();
   `;
   (document.head || document.documentElement).appendChild(script);
@@ -100,17 +113,10 @@ function nukeAds() {
     '.ad-banner',
     '[class*="AdSlot"]',
     '#player-overlay-0',
-    '[data-test-selector="sda-wrapper"]',
     '[data-test-selector="sda-container"]',
-    '.stream-display-ad__wrapper',
-    '#stream-lowerthird',
-    '[data-a-target="outstream-ax-overlay"]',
-    '.extensions-video-overlay-size-container',
-    '.extensions-dock__layout',
-    '.extensions-notifications',
-    'iframe[src*="supervisor.ext-twitch.tv"]',
-    'iframe[src*="extensions-discovery"]',
-    '[class*="extensions-"]'
+    '[data-a-target="ax-overlay"]',
+    '.celebration__overlay',
+    'iframe[src*="supervisor.ext-twitch.tv"]'
   ];
   
   selectors.forEach(sel => {
@@ -121,60 +127,38 @@ function nukeAds() {
       
       if (!blockedElementsCache.has(blockId)) {
         adsBlocked = true;
-        console.log('[TwitchCleaner] Blocking UI ad:', sel, `(${els.length} elements)`);
       }
+      
+      els.forEach(el => {
+        if (el && el.parentNode) {
+          el.remove();
+        }
+      });
     }
-    els.forEach(el => {
-      if (el && el.parentNode) {
-        el.parentNode.removeChild(el);
-      }
-    });
   });
 
-  try {
-     if (window.AmazonVideoAds) window.AmazonVideoAds = undefined;
-     if (window.twitchAds) window.twitchAds = undefined;
-     if (window.Twitch && window.Twitch.ext) window.Twitch.ext = undefined;
-  } catch(e) {}
-  
-  const iframes = document.querySelectorAll('iframe[src*="ads"], iframe[src*="amazon-adsystem"], iframe[src*="doubleclick"]');
-  if (iframes.length > 0) {
-    const iframeBlockId = `iframe-ads-${iframes.length}`;
-    currentBlockedElements.add(iframeBlockId);
-    
-    if (!blockedElementsCache.has(iframeBlockId)) {
-      adsBlocked = true;
-      console.log('[TwitchCleaner] Blocking ad iframes:', iframes.length);
-    }
-  }
-  iframes.forEach(iframe => {
-    if (iframe && iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
-    }
-  });
-  
   const now = Date.now();
   if (adsBlocked && (now - lastAdBlockTime) > 2000) {
     lastAdBlockTime = now;
     const blockTime = performance.now() - startTime;
-    browser.runtime.sendMessage({ 
-      type: 'AD_BLOCKED_UI',
-      timestamp: now,
-      blockTime: blockTime
-    }).catch(() => {});
+    try {
+      browser.runtime.sendMessage({ 
+        type: 'AD_BLOCKED_UI',
+        blockTime: blockTime
+      });
+    } catch(e) {}
   }
   
   blockedElementsCache = currentBlockedElements;
 }
 
-injectConfigPatcher();
-injectStyles();
-
 function init() {
   browser.storage.local.get(['isEnabled'], (data) => {
     if (data.isEnabled !== false) {
+      injectStyles();
+      injectConfigPatcher();
       setInterval(nukeAds, 1000);
-      console.log('[TwitchCleaner] UI Blocker Active');
+      console.log('[TwitchCleaner] UI Armor Active');
     }
   });
 }
