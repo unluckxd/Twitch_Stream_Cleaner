@@ -65,9 +65,38 @@
     
     const originalFetch = window.fetch;
     window.fetch = async function(url, options) {
+        if (typeof url === 'string' && url.includes('gql.twitch.tv/gql')) {
+            if (options && options.body) {
+                try {
+                    const body = JSON.parse(options.body);
+                    let modified = false;
+                    
+                    const preferredPlayerType = 'embed';
+                    
+                    if (Array.isArray(body)) {
+                        body.forEach(item => {
+                            if (item?.variables?.playerType && item.variables.playerType !== preferredPlayerType) {
+                                console.log(`[StreamFetcher] 🔄 Replacing playerType '${item.variables.playerType}' with '${preferredPlayerType}'`);
+                                item.variables.playerType = preferredPlayerType;
+                                modified = true;
+                            }
+                        });
+                    } else if (body?.variables?.playerType && body.variables.playerType !== preferredPlayerType) {
+                        console.log(`[StreamFetcher] 🔄 Replacing playerType '${body.variables.playerType}' with '${preferredPlayerType}'`);
+                        body.variables.playerType = preferredPlayerType;
+                        modified = true;
+                    }
+                    
+                    if (modified) {
+                        options.body = JSON.stringify(body);
+                    }
+                } catch (e) {
+                }
+            }
+        }
+        
         if (typeof url === 'string' && url.includes('.m3u8')) {
             if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                // Улучшенное определение имени канала
                 let channelName = null;
                 const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
                 const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
@@ -76,7 +105,7 @@
                 else if (channelParamMatch) channelName = channelParamMatch[1];
                 
                 if (channelName) {
-                    console.log(`[StreamFetcher] 🔍 Detected channel: ${channelName}`);
+                    console.log(`[StreamFetcher] Detected channel: ${channelName}`);
                     
                     for (const playerType of ['embed', 'frontpage']) {
                         try {
@@ -98,16 +127,16 @@
                                 !testText.includes('SCTE35') && 
                                 !testText.includes('twitch-stitched-ad') &&
                                 testText.includes('#EXTINF')) {
-                                console.log(`[StreamFetcher] ✅ Preemptively using clean stream (${playerType})`);
+                                console.log(`[StreamFetcher] Preemptively using clean stream (${playerType})`);
                                 return new Response(testText, {
                                     status: 200,
                                     headers: testResponse.headers
                                 });
                             } else {
-                                console.log(`[StreamFetcher] ❌ ${playerType} has ads, trying next...`);
+                                console.log(`[StreamFetcher] ${playerType} has ads, trying next...`);
                             }
                         } catch (err) {
-                            console.log(`[StreamFetcher] ⚠️ ${playerType} failed: ${err.message}`);
+                            console.log(`[StreamFetcher] ${playerType} failed: ${err.message}`);
                         }
                     }
                 }
@@ -116,7 +145,6 @@
             const response = await originalFetch.apply(this, arguments);
             
             if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                // Улучшенное определение имени канала
                 let channelName = null;
                 const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
                 const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
@@ -215,7 +243,7 @@
                 if (self.readyState === 4 && self.status === 200) {
                     const text = self.responseText;
                     if (text && (text.includes('stitched-ad') || text.includes('SCTE35'))) {
-                        console.log('[StreamFetcher] 🚨 XHR: Ads detected in playlist');
+                        console.log('[StreamFetcher] XHR: Ads detected in playlist');
                     }
                 }
                 if (originalOnReadyStateChange) {

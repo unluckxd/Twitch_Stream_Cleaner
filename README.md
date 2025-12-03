@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.2.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.4-blue" alt="Version">
 </p>
 
 ---

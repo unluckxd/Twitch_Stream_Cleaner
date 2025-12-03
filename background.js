@@ -46,43 +46,6 @@ browser.webRequest.onBeforeRequest.addListener(
         console.log('[TwitchCleaner] Blocked Ad GQL Request');
         return { cancel: true };
       }
-      
-      if (body.includes("PlaybackAccessToken")) {
-        try {
-          const bodyObj = JSON.parse(body);
-          let modified = false;
-          
-          const playerTypes = ['embed', 'frontpage', 'site'];
-          const randomPlayerType = playerTypes[Math.floor(Math.random() * playerTypes.length)];
-          
-          if (Array.isArray(bodyObj)) {
-            bodyObj.forEach(item => {
-              if (item?.variables?.playerType) {
-                const originalType = item.variables.playerType;
-                item.variables.playerType = randomPlayerType;
-                console.log(`[TwitchCleaner] Replacing playerType '${originalType}' with '${randomPlayerType}'`);
-                modified = true;
-              }
-            });
-          } else if (bodyObj?.variables?.playerType) {
-            const originalType = bodyObj.variables.playerType;
-            bodyObj.variables.playerType = randomPlayerType;
-            console.log(`[TwitchCleaner] Replacing playerType '${originalType}' with '${randomPlayerType}'`);
-            modified = true;
-          }
-          
-          if (modified) {
-            const newBody = JSON.stringify(bodyObj);
-            return {
-              requestBody: {
-                raw: [{ bytes: new TextEncoder().encode(newBody).buffer }]
-              }
-            };
-          }
-        } catch (err) {
-          console.error('[TwitchCleaner] Failed to modify GQL body:', err);
-        }
-      }
     } catch(e) {}
     
     return {};
