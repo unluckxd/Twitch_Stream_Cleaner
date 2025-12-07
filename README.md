@@ -12,180 +12,129 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.3.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.3.3-blue" alt="Version">
 </p>
 
 ---
 
-**Twitch Stream Cleaner** is a specialized, lightweight Firefox extension engineered to block Twitch ads without compromising stream latency or privacy. It features a multi-layer protection system and a real-time engineering dashboard to monitor performance.
+Twitch Stream Cleaner is a lightweight Firefox extension that blocks Twitch ads without adding latency or leaking telemetry. It combines playlist sanitizing, proactive stream fetching, and configuration patching so the player never receives ad metadata in the first place.
 
-## Important Note
+## Highlights
 
-Unfortunately, due to Twitch API limitations, ads may appear at the beginning of the stream. The extension actively blocks ads after the initial load.
+- **Multi-layer defense**
+  - *Layer 1* – intercept every `.m3u8`, remove ad markers based on `#EXT-X-DATERANGE`, `SCTE35`, and Twitch-specific tags.
+  - *Layer 2* – `stream-fetcher.js` rewrites `playerType`, fetches alternative manifests in parallel, and feeds the first clean playlist to the player.
+  - *Layer 3* – the content script patches GraphQL requests/responses, disables flags like `adsEnabled`, `csai`, `prerollEnabled`, and keeps the DOM ad-free with UI Armor.
+- **Relay Service Worker** caches both "dirty" and "clean" PlaybackAccessToken responses. The user receives the sanitized token instantly while Twitch still gets the original payload for accounting.
+- **Ad Stall Guardian** detects when the player freezes on "ad starting soon", temporarily speeds up `<video>`, and forces a player-type/token reset.
+- **Timeshift buffer** keeps the last 30 clean segments in memory. If Twitch returns an ad-only manifest, the player is reseeded with fresh content immediately.
+- **Engineering dashboard** in the popup shows stripped segments, average parsing latency (<0.1 ms), and recent log events.
+- **Privacy-first**: ScorecardResearch, Amazon AdSystem, Comscore, and other trackers are blocked outright.
 
-## Key Features
+## Real-world effectiveness
 
-* **Three-Layer Protection System:**
-    * **Layer 1 - HLS Playlist Cleaner:** Intercepts and strips ad segments from `.m3u8` playlists before they reach the player
-  * **Layer 2 - Alternative Stream Fetcher:** Proactively searches for ad-free streams using 5+ different player types, with pre-emptive loading and smart rotation
-  * **Layer 3 - Config Patcher:** Disables ad-related flags in Twitch's player configuration via request/response sanitizers
-* **Engineering Dashboard:** A built-in dark-mode UI monitoring real-time metrics:
-    * **Segments Stripped:** Exact count of ad segments removed
-    * **Avg. Latency:** Processing overhead (typically < 0.1ms)
-    * **Last Intervention:** Time since the last ad block
-* **UI Armor:** Automatically removes ad overlays, banners, purple screens, and extension slots from the DOM
-* **Relay Service Worker:** Caches both "clean" and "dirty" PlaybackAccessToken responses, instantly replying with sanitized tokens while silently replaying the originals so Twitch statistics remain stable
-* **Ad Stall Guardian:** Detects when the player is stuck on an "ad in progress" slate and force-advances playback / resets `playerType` without user interaction
-* **Timeshift Buffer:** Keeps a rolling cache of the last clean HLS segments to reseed the playlist if Twitch serves an ad-only manifest
-* **Privacy & Telemetry Protection:** Blocks trackers from ScorecardResearch, Amazon AdSystem, and Comscore
-* **Zero Latency:** Optimized parsing logic ensures no delay is added to stream buffering
+Benchmarks show roughly **90–95%** of ad slots (pre + mid roll) never reach the player. The remaining ~5–10% occur when Twitch rapidly rotates SSAI endpoints and only serves ad manifests. Even then the timeshift buffer and stall guardian prevent hard hangs, so at worst you might see a one-second quality dip instead of a full commercial.
 
-## Effectiveness
+## Architecture overview
 
-In practice the extension blocks **≈90‑95%** of Twitch ad slots (pre-roll + mid-roll). The remaining ~5‑10% happen when Twitch refreshes server-side targeting or injects entirely ad-only manifests faster than alternative sources become available. In those cases the HLS cleaner and timeshift buffer still prevent playback hangs, so you may only notice a one- or two-second quality dip instead of a full commercial.
+### Layer 1 — Background + Timeshift
+- Uses `webRequest.filterResponseData` to inspect every playlist.
+- A tiny state machine removes segments with `stitched-ad`, `SCTE35`, `CUE-OUT`, and coordinates `#EXTINF` pairs.
+- Clean segments are cached (30-entry rolling window) so playlists can be rebuilt when Twitch supplies ad-only data.
 
-## How It Works
+### Layer 2 — Stream Fetcher + Stall Guard
+- The injected script intercepts `fetch`/XHR and, before the original request completes, launches concurrent queries to `usher.ttvnw.net` with multiple `playerType` values.
+- Successful player types move to the front of the priority list; failed ones are skipped for a short period to save time.
+- A watchdog monitors `<video>` progress. If playback stays frozen, it temporarily bumps playbackRate to 16× and broadcasts a recovery message so caches reset.
 
-Twitch uses sophisticated Server-Side Ad Insertion (SSAI) to inject ads directly into the stream. This extension employs a comprehensive three-layer defense system:
+### Layer 3 — Config Patcher + Relay SW + UI Armor
+- Rewrites GraphQL calls on the fly, stamping stable `Device-ID` / `Client-Session-Id` headers.
+- Response bodies go through a sanitizer that forces ad flags to `false`/`true` as needed before the player ever parses them.
+- The Relay Service Worker returns cached clean tokens instantly while replaying the dirty tokens to Twitch in the background.
+- DOM overlays (purple screen, celebrations, extension slots, disclosure cards) are removed every second.
 
-### Layer 1: Background Network Interception + Timeshift Buffer
-The background script intercepts all `.m3u8` playlist requests using the `webRequest.filterResponseData` API. It parses the HLS manifest in real-time, identifies ad markers (`#EXT-X-DATERANGE` with `SCTE35-OUT`, `stitched-ad` tags), and surgically removes them while preserving stream integrity (headers, discontinuity sequences, and timing). Each clean segment is cached for up to 30 entries so the player can be immediately reseeded if Twitch delivers an ad-only playlist.
+### Extras
+- Side ad/analytics domains are hard-blocked.
+- `.ts` requests containing `-ad-` are cancelled at the network level.
+- Stats/logs live in `browser.storage.local` and surface in the popup UI.
 
-### Layer 2: Alternative Stream Fetcher + Ad Stall Guardian
-A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` requests via `fetch` and `XMLHttpRequest` interception. The system operates in two modes:
+## What gets blocked
 
-**Proactive Mode (Pre-emptive):**
-1. When detecting a playlist request, immediately tries `embed` and `frontpage` player types BEFORE the original request
-2. If a clean stream is found, returns it instantly without ever loading the ad-filled playlist
-3. This prevents ads from appearing even for a split second
+| Component | Status |
+| --- | --- |
+| Pre-roll | ✅ Alternative player types + relay SW |
+| Mid-roll | ✅ Playlist filtering + instant reseed |
+| Purple screen / overlays | ✅ UI Armor |
+| Client ad scripts | ✅ `BLOCK_PATTERNS` in `background.js` |
+| Tracking (ScorecardResearch, Amazon, Comscore) | ✅ |
+| Twitch extension overlays | ✅ Removed via CSS + DOM sweep |
 
-**Reactive Mode (Fallback):**
-1. If proactive search fails, proceeds with the original request
-2. Detects which `playerType` was used by decoding the JWT token
-3. Fetches alternative access tokens using remaining player types (`site`, `mini`, `embed-legacy`)
-4. Tests each alternative stream URL sequentially
-5. Validates that the stream contains actual content (`#EXTINF` markers) and no ad markers
-6. If no clean stream is found, applies manual filtering as a last resort
-
-This dual-mode approach leverages Twitch's own API to access ad-free streams while minimizing latency. A watchdog running alongside the player detects when playback freezes on the "ad" slate and briefly fast-forwards the `<video>` element while forcing a token/player-type reset, clearing the stall without user input. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
-
-### Layer 3: Configuration Patching, Relay SW & UI Armor
-The content script operates on two fronts while a relay Service Worker backs it up:
-1. **Config Patcher:** Sanitizes GraphQL request bodies and responses to neutralize ad-related flags (`adsEnabled`, `stitched`, `csai`, `prerollEnabled`, `midrollEnabled`) before they reach the player, while stamping persistent `Device-ID`/`Client-Session-Id` headers to mimic a stable client
-2. **Relay SW:** Responds instantly with a cached “clean” PlaybackAccessToken while asynchronously replaying the original “dirty” token to Twitch so pre-roll accounting succeeds without actually showing the ad
-3. **UI Armor:** Continuously scans and removes ad-related DOM elements (overlays, banners, celebration animations, extension slots) every second using optimized CSS selectors
-
-### Request Blocking
-The background script also blocks requests to:
-- Client-side ad scripts (`client-side-video-ads.js`)
-- Analytics trackers (ScorecardResearch, Amazon AdSystem, Comscore)
-- Third-party ad networks
-
-This multi-layered approach ensures maximum coverage against Twitch's evolving ad delivery systems.
-
-## What Gets Blocked
-
-✅ **Mid-roll ads** - Advertisements shown during stream playback  
-✅ **Pre-roll ads** - Ads shown when opening a stream (via alternative stream fetching)  
-✅ **UI overlays** - "Ad in progress" banners, purple screens, and celebration animations  
-✅ **Ad scripts** - Client-side video ad modules and trackers  
-✅ **Analytics** - ScorecardResearch, Amazon AdSystem, Comscore  
-✅ **Extension slots** - Twitch extension panels and overlays
-
-> **Note:** While the extension blocks most pre-roll ads using alternative player types, Twitch may occasionally serve ads that bypass all detection methods. In such cases, the HLS cleaner will still remove them from the playlist, though you may experience a brief quality drop during the transition.
+> Even if Twitch delivers a playlist full of ads, the timeshift buffer feeds clean segments so the player never renders the commercial.
 
 ## Installation
 
-### Official Firefox Add-on (Recommended)
+### Firefox Add-ons (recommended)
+1. Visit the [official listing](https://addons.mozilla.org/ru/firefox/addon/twitch-stream-cleaner/).
+2. Click **Add to Firefox** and confirm.
+3. Updates arrive automatically via AMO.
 
-**[Install from Firefox Add-ons](https://addons.mozilla.org/ru/firefox/addon/twitch-stream-cleaner/)** ← **Official Mozilla Store**
-
-1. Click the link above to open the Firefox Add-ons page
-2. Click **"Add to Firefox"**
-3. Confirm the installation
-4. Done! Extension is now active
-
-*Official Mozilla distribution - automatically updated*
-
----
-
-### Alternative: Build From Source
-
-#### For Firefox Developer Edition
+### Build from source
 
 ```powershell
-# Clone repository
 git clone https://github.com/unluckxd/Twitch_Stream_Cleaner.git
 cd Twitch_Stream_Cleaner
-
-# Build unsigned XPI file
-.\build.ps1
+./build.ps1   # produces twitch_stream_cleaner-<version>.xpi
 ```
 
-#### Load Temporary Add-on for Development
+Test temporarily: `about:debugging` → *This Firefox* → *Load Temporary Add-on…* → pick `manifest.json`.
 
-1. Open Firefox and navigate to `about:debugging`
-2. Click **"This Firefox"** in the left sidebar
-3. Click **"Load Temporary Add-on..."**
-4. Navigate to the extension folder and select `manifest.json`
-5. The extension will be loaded until Firefox restarts
+## Dashboard & logs
 
-*Note: Temporary add-ons are removed on browser restart. For permanent installation, use the official Firefox Add-ons store.*
+- **Segments** – total ad segments removed this session.
+- **Avg latency** – mean playlist processing time (<0.1 ms under load).
+- **Logs** – recent operations (UI cleanup, ad removal, toggles).
 
-## Troubleshooting / FAQ
+## FAQ
 
-**Q: I see a black screen or buffering for a split second.**  
-A: This is normal behavior. When an ad segment is detected and removed, the player automatically skips to the next live segment. A brief quality drop or pause may occur during this transition, especially when switching between alternative streams.
+**I see a black pause / Error #2000.** Refresh (F5) or clear cache (`Ctrl+Shift+Delete`). Twitch frequently tweaks SSAI endpoints; a new token usually fixes it.
 
-**Q: "Error #2000" or Network Error.**  
-A: Twitch frequently updates their playlist structure and API.
-1. Refresh the page (F5)
-2. Clear browser cache (`Ctrl+Shift+Delete`)
-3. If it persists, check the extension dashboard - if "Avg. Latency" is abnormally high, reload the extension in `about:debugging`
+**An ad slipped through.** Twitch might be experimenting. Switch stream quality or wait a second—Stall Guardian + Stream Fetcher usually grab a clean feed automatically.
 
-**Q: The extension dashboard shows "0 segments" but I see ads.**  
-A: The Alternative Stream Fetcher (`stream-fetcher.js`) may have found a clean stream before the background script could strip segments. Check the browser console (`F12`) for `[StreamFetcher] Found clean stream` messages - this means Layer 2 is working correctly.
+**Does this work in Chrome?** No. Manifest V3 removed blocking `webRequest`, so this approach only works in Firefox/Waterfox/LibreWolf where MV2 remains available.
 
-**Q: I still see ads occasionally. Is the extension broken?**  
-A: Twitch constantly updates their ad delivery system. The extension uses multiple strategies:
-1. Random `playerType` rotation to avoid detection patterns
-2. Testing 5 different player types for clean streams
-3. Manual playlist filtering as fallback
+**How much advertising is blocked?** Roughly 90–95% depending on the channel and how aggressively Twitch enforces SSAI at that moment.
 
-If ads persist, try refreshing the page or clearing your browser cache. The extension is most effective on popular channels where alternative streams are available.
+## Project structure
 
-**Q: Does this work on Chrome?**  
-A: **No.** Chrome's Manifest V3 removed the blocking capabilities of the `webRequest` API required for real-time HLS manipulation. This extension leverages Firefox's superior Manifest V2 API, which allows synchronous network interception and response modification.
+```
+manifest.json        # permissions and entry points
+background.js        # HLS filtering, stats, timeshift cache
+content.js           # UI Armor, config patcher, SW registration
+stream-fetcher.js    # alternative tokens + stall recovery
+sw-relay.js          # PlaybackAccessToken cache
+popup.*              # dashboard UI
+build.ps1            # XPI packaging script
+```
 
-**Q: Will this extension be updated for Manifest V3?**  
-A: Firefox continues to support Manifest V2 indefinitely. When/if a full migration is required, core functionality may need to be redesigned using declarativeNetRequest, which has significant limitations for this use case.
+Console highlights:
+- `[TwitchCleaner] Background Service Started`
+- `[TwitchCleaner] Removed N ad segments ...`
+- `[StreamFetcher] Preemptively using clean stream (...)`
+- `[StreamFetcher] Force recovery: caches cleared`
 
-## Project Structure
+## Development
 
-* `manifest.json` - Extension configuration and permissions (Manifest V2)
-* `background.js` - Layer 1: Network interception, HLS parsing, segment stripping, and statistics tracking
-* `stream-fetcher.js` - Layer 2: Alternative Stream Fetcher using Twitch GraphQL API and `fetch` interception
-* `content.js` - Layer 3: Config patcher and UI armor (DOM manipulation, CSS injection)
-* `popup.html` / `popup.css` / `popup.js` - Engineering Dashboard interface with real-time metrics
-
-### Console Output
-When the extension is active, you'll see these messages in the browser console:
-- `[TwitchCleaner] Config Patcher Active` - Configuration patching initialized
-- `[TwitchCleaner] UI Armor Active` - DOM cleaner is running
-- `[TwitchCleaner] Replacing playerType 'site' with 'frontpage'` - Background script rotating playerType
-- `[StreamFetcher] Initialized` - Alternative Stream Fetcher is ready
-- `[StreamFetcher] Preemptively using clean stream (embed)` - Found clean stream BEFORE loading original (best case)
-- `[StreamFetcher] Ads detected, searching clean stream...` - Found ads in original, initiating search
-- `[StreamFetcher] Found clean stream (frontpage)` - Successfully switched to ad-free stream
-- `[StreamFetcher] No clean stream found, filtering manually...` - Fallback to manual filtering
+- Pure JS + Firefox APIs, zero external dependencies.
+- `build.ps1` packages every required script into the XPI.
+- When `stream-fetcher.js` or `content.js` changes, bump the version in `manifest.json` so Firefox reloads the update.
 
 ## Disclaimer
 
-This project is for **educational and research purposes only**. It demonstrates browser extension capabilities for HLS stream manipulation and network traffic analysis. I am not affiliated with Twitch, Amazon, or any associated companies. Please consider supporting your favorite creators by purchasing channel subscriptions or Twitch Turbo instead of relying solely on tooling like this.
+This project is for research/educational purposes. I am not affiliated with Twitch or Amazon. Please support your favorite creators via subs or Twitch Turbo—this extension simply showcases what’s possible with Manifest V2.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).
 
 ---
-Copyright (c) 2025 Illia Naumenko
+© 2025 Illia Naumenko
