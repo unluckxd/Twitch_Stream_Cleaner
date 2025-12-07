@@ -12,7 +12,17 @@
     }
     window.twitchAdSolutionsActive = true;
     
-    const BACKUP_PLAYER_TYPES = ['embed', 'frontpage', 'site', 'mini', 'embed-legacy'];
+    const CLEAN_PLAYER_TYPES = [
+        'picture-by-picture',
+        'thunderdome',
+        'popout',
+        'embed',
+        'frontpage',
+        'mini',
+        'embed-legacy',
+        'site'
+    ];
+    const BACKUP_PLAYER_TYPES = CLEAN_PLAYER_TYPES.slice();
     const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
     
     let accessTokenCache = new Map();
@@ -107,7 +117,7 @@
                 if (channelName) {
                     console.log(`[StreamFetcher] Detected channel: ${channelName}`);
                     
-                    for (const playerType of ['embed', 'frontpage']) {
+                    for (const playerType of CLEAN_PLAYER_TYPES) {
                         try {
                             const tokenData = await getAccessToken(channelName, playerType);
                             if (!tokenData?.data?.streamPlaybackAccessToken) continue;

@@ -43,8 +43,13 @@ const CSS_HIDE = `
   .extension-view__iframe-wrapper,
   .extensions-video-overlay-size-container,
   .extensions-dock__layout,
+  .extensions-dock__dock,
+  .extensions-popover,
+  .extensions-dock-card,
+  .extensions-info-balloon,
   .extensions-notifications,
-  .extensions-info-balloon__close-button,
+  [aria-labelledby="popover-extensions-header"],
+  [aria-describedby="popover-extensions-body"],
   div[class*="extensions"],
   iframe[src*="supervisor.ext-twitch.tv"],
   iframe[src*="extensions-discovery"] {
@@ -131,9 +136,21 @@ function injectConfigPatcher() {
         return data;
       };
 
-      Object.defineProperties(window, {
-        'AmazonVideoAds': { get: () => undefined, set: () => {} },
-        'twitchAds': { get: () => undefined, set: () => {} }
+      ['AmazonVideoAds', 'twitchAds'].forEach((prop) => {
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(window, prop);
+          if (!descriptor || descriptor.configurable) {
+            Object.defineProperty(window, prop, {
+              configurable: true,
+              get: () => undefined,
+              set: () => {}
+            });
+          } else if (descriptor.writable) {
+            window[prop] = undefined;
+          }
+        } catch (err) {
+          console.debug('[TwitchCleaner] Skipped redefining ' + prop + ': ' + err.message);
+        }
       });
       
       console.log('[TwitchCleaner] Config Patcher Active');
@@ -159,7 +176,14 @@ function nukeAds() {
     '[data-test-selector="sda-container"]',
     '[data-a-target="ax-overlay"]',
     '.celebration__overlay',
-    'iframe[src*="supervisor.ext-twitch.tv"]'
+    'iframe[src*="supervisor.ext-twitch.tv"]',
+    '.extensions-dock__layout',
+    '.extensions-dock__dock',
+    '.extensions-popover',
+    '.extensions-dock-card',
+    '.extensions-info-balloon',
+    '[aria-labelledby="popover-extensions-header"]',
+    '[aria-describedby="popover-extensions-body"]'
   ];
   
   selectors.forEach(sel => {

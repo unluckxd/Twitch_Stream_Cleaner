@@ -23,11 +23,30 @@ const BLOCK_PATTERNS = [
 
 browser.webRequest.onBeforeRequest.addListener(
   (details) => { 
-    if (details.url.includes('.m3u8') || details.url.includes('.ts') || details.url.includes('.mp4')) return {};
+    if (details.url.includes('.m3u8') || details.url.includes('.mp4')) return {};
     
     return { cancel: true }; 
   },
   { urls: BLOCK_PATTERNS },
+  ["blocking"]
+);
+
+browser.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    const url = details.url;
+    
+    if (url.includes('stitched-ad') || 
+        url.includes('-ad-') ||
+        url.includes('/ad/') ||
+        url.includes('ads-') ||
+        url.match(/-\d+-ad\.ts/)) {
+      console.log('[TwitchCleaner] Blocked ad segment:', url.substring(url.lastIndexOf('/') + 1));
+      return { cancel: true };
+    }
+    
+    return {};
+  },
+  { urls: ["*://*.ttvnw.net/*.ts*"] },
   ["blocking"]
 );
 
