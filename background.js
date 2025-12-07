@@ -78,6 +78,24 @@ let BLOCKED_COUNT = 0;
 let LOGS = [];
 let BLOCK_TIMES = [];
 
+const AD_URL_PATTERNS = [
+  /stitched-ad/i,
+  /\/v1\/segment\/ad\//i,
+  /-ad-/i,
+  /ad_break/i,
+  /google_/i,
+  /\/ads\//i
+];
+
+const AD_METADATA_PATTERNS = [
+  /DATERANGE.*twitch-stitched-ad/i,
+  /DATERANGE.*SCTE35/i,
+  /SCTE35-(OUT|IN)/i,
+  /CUE-OUT/i,
+  /EXT-X-TWITCH-AD/i,
+  /EXT-X-TWITCH-PREFETCH-AD/i
+];
+
 browser.storage.local.get(['isEnabled', 'blockedCount', 'logs', 'avgBlockTime'], (data) => {
   IS_ENABLED = data.isEnabled !== false;
   BLOCKED_COUNT = data.blockedCount || 0;
@@ -129,95 +147,131 @@ browser.runtime.onMessage.addListener((msg) => {
   }
 });
 
+function containsAdMetadata(line) {
+  return AD_METADATA_PATTERNS.some((regex) => regex.test(line));
+}
+
+function extractDurationHint(line) {
+  const durationMatch = line.match(/DURATION=([0-9.]+)/i);
+  if (durationMatch) {
+    return parseFloat(durationMatch[1]);
+  }
+  const cueMatch = line.match(/CUE-OUT.*?([0-9.]+)/i);
+  if (cueMatch) {
+    return parseFloat(cueMatch[1]);
+  }
+  return 0;
+}
+
+function shouldDropSegment(url) {
+  return AD_URL_PATTERNS.some((regex) => regex.test(url));
+}
+
+function estimateSkipCount(duration) {
+  if (!duration || Number.isNaN(duration)) return 2;
+  const averageSegmentLength = 4;
+  return Math.max(1, Math.ceil(duration / averageSegmentLength));
+}
+
 function processPlaylist(text) {
   if (!IS_ENABLED) return text;
-  
+
   const startTime = performance.now();
-  
+
   if (text.includes('twitch-stitched-ad') && !text.includes('#EXTINF')) {
-     console.log('[TwitchCleaner] Blocked ad-only playlist');
-     updateStats(0.1);
-     logToUI('Blocked Pre-roll Ad');
-     return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
+    console.log('[TwitchCleaner] Blocked ad-only playlist');
+    updateStats(0.1);
+    logToUI('Blocked Pre-roll Ad');
+    return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n#EXT-X-ENDLIST`;
   }
 
   const lines = text.split('\n');
   const cleanLines = [];
-  
-  let isAdSegment = false;
-  let skipNextSegment = false;
+
+  let pendingExtInf = null;
+  let pendingDuration = 0;
+  let scheduledSkips = 0;
   let adBlockedSegments = 0;
+
+  const flushPending = () => {
+    if (pendingExtInf) {
+      cleanLines.push(pendingExtInf);
+      pendingExtInf = null;
+      pendingDuration = 0;
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+    if (!trimmed) continue;
 
-    if (trimmed.startsWith('#EXTM3U') || trimmed.startsWith('#EXT-X-')) {
-      
-      if (trimmed.includes('DATERANGE')) {
-         if (trimmed.includes('stitched-ad') || 
-             trimmed.includes('class=\"twitch-stitched-ad\"') || 
-             trimmed.includes('SCTE35-OUT') ||
-             trimmed.includes('SCTE35-IN') ||
-             trimmed.includes('SCTE35')) {
-            isAdSegment = true;
-            adBlockedSegments++;
-            continue;
-         }
-      }
-      
-      if (trimmed.includes('PROGRAM-DATE-TIME') && isAdSegment) {
-        isAdSegment = false;
-      }
-
-      if (isAdSegment) continue;
-      
+    if (trimmed.startsWith('#EXTM3U')) {
+      flushPending();
       cleanLines.push(line);
       continue;
     }
 
-    if (isAdSegment) {
-      if (trimmed.startsWith('#EXTINF')) skipNextSegment = true;
-      continue; 
-    }
-
-    if (trimmed.includes('stitched-ad') || 
-        trimmed.includes('scte35') || 
-        trimmed.includes('/v1/segment/ad/') ||
-        trimmed.includes('-ad-') ||
-        trimmed.includes('google_')) {
-       if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1].trim().startsWith('#EXTINF')) {
-          cleanLines.pop(); 
-          adBlockedSegments++;
-       }
-       continue;
-    }
-
-    if (skipNextSegment && !trimmed.startsWith('#')) {
-      skipNextSegment = false;
+    if (trimmed.startsWith('#EXTINF')) {
+      pendingExtInf = line;
+      const durationPart = trimmed.substring(8).split(',')[0];
+      const parsedDuration = parseFloat(durationPart);
+      pendingDuration = Number.isNaN(parsedDuration) ? 0 : parsedDuration;
       continue;
     }
 
+    if (trimmed.startsWith('#')) {
+      if (containsAdMetadata(trimmed)) {
+        const durationHint = extractDurationHint(trimmed);
+        scheduledSkips = Math.max(scheduledSkips, estimateSkipCount(durationHint));
+        continue;
+      }
+
+      if (trimmed.includes('CUE-IN')) {
+        scheduledSkips = 0;
+        continue;
+      }
+
+      flushPending();
+      cleanLines.push(line);
+      continue;
+    }
+
+    const dropForSchedule = scheduledSkips > 0;
+    const dropForPattern = shouldDropSegment(trimmed);
+    const shouldDrop = dropForSchedule || dropForPattern;
+
+    if (shouldDrop) {
+      adBlockedSegments++;
+      if (scheduledSkips > 0) {
+        scheduledSkips--;
+      }
+      pendingExtInf = null;
+      pendingDuration = 0;
+      continue;
+    }
+
+    flushPending();
     cleanLines.push(line);
   }
 
+  flushPending();
+
   if (adBlockedSegments > 0) {
     const blockTime = performance.now() - startTime;
-    let timeDisplay = blockTime < 0.005 ? "< 0.01" : blockTime.toFixed(3);
-    
+    const timeDisplay = blockTime < 0.005 ? '< 0.01' : blockTime.toFixed(3);
+
     console.log(`[TwitchCleaner] Removed ${adBlockedSegments} ad segments in ${timeDisplay}ms`);
     updateStats(blockTime);
     logToUI(`Removed ${adBlockedSegments} segments (${timeDisplay}ms)`);
   }
 
   let finalClean = cleanLines.join('\n');
-  
   finalClean = finalClean.replace(/.*stitched-ad.*/gi, '');
   finalClean = finalClean.replace(/.*SCTE35.*/gi, '');
   finalClean = finalClean.replace(/.*\/v1\/segment\/ad\/.*/gi, '');
-  
   finalClean = finalClean.replace(/\n\n+/g, '\n');
-  
+
   return finalClean;
 }
 

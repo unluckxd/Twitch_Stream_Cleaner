@@ -29,11 +29,79 @@
         'embed-legacy',
         'site'
     ];
-    const BACKUP_PLAYER_TYPES = CLEAN_PLAYER_TYPES.slice();
     const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+    const CONCURRENT_TRIES = 3;
     
     let accessTokenCache = new Map();
     let usedPlayerTypes = new Set();
+
+    function playlistHasAds(text) {
+        if (!text) return false;
+        return text.includes('stitched-ad') || text.includes('SCTE35') || text.includes('twitch-stitched-ad');
+    }
+
+    function buildPlayerTypePriority(excludedType = null) {
+        const preferred = Array.from(usedPlayerTypes).filter((type) => type !== excludedType);
+        const remaining = CLEAN_PLAYER_TYPES.filter((type) => type !== excludedType && !usedPlayerTypes.has(type));
+        return [...preferred, ...remaining];
+    }
+
+    async function attemptCleanRequest(channelName, url, playerType) {
+        try {
+            const tokenData = await getAccessToken(channelName, playerType);
+            if (!tokenData?.data?.streamPlaybackAccessToken) return null;
+
+            const token = tokenData.data.streamPlaybackAccessToken;
+            const craftedUrl = new URL(url);
+            craftedUrl.searchParams.set('sig', token.signature);
+            craftedUrl.searchParams.set('token', token.value);
+            craftedUrl.searchParams.set('player_type', playerType);
+
+            const response = await originalFetch(craftedUrl.toString());
+            if (!response.ok) return null;
+
+            const text = await response.text();
+            if (playlistHasAds(text) || !text.includes('#EXTINF')) return null;
+
+            return {
+                playerType,
+                text,
+                headers: response.headers
+            };
+        } catch (err) {
+            console.log(`[StreamFetcher] ${playerType} failed: ${err.message}`);
+            return null;
+        }
+    }
+
+    async function findCleanStream(channelName, url, playerTypes) {
+        for (let i = 0; i < playerTypes.length; i += CONCURRENT_TRIES) {
+            const batch = playerTypes.slice(i, i + CONCURRENT_TRIES);
+            const attempts = await Promise.all(batch.map((type) => attemptCleanRequest(channelName, url, type)));
+            const winner = attempts.find(Boolean);
+            if (winner) {
+                usedPlayerTypes.add(winner.playerType);
+                return winner;
+            }
+        }
+        return null;
+    }
+
+    function extractChannelNameFromUrl(url) {
+        try {
+            const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
+            if (m3u8Match) return decodeURIComponent(m3u8Match[1]);
+            const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
+            if (channelParamMatch) return decodeURIComponent(channelParamMatch[1]);
+        } catch (err) {
+            console.debug('[StreamFetcher] Failed to parse channel name:', err.message);
+        }
+        return null;
+    }
+
+    function isLivePlaylistRequest(url) {
+        return typeof url === 'string' && url.includes('.m3u8') && (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net'));
+    }
     
     async function getAccessToken(channelName, playerType) {
         const cacheKey = `${channelName}_${playerType}`;
@@ -112,130 +180,56 @@
             }
         }
         
-        if (typeof url === 'string' && url.includes('.m3u8')) {
-            if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                let channelName = null;
-                const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
-                const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
-                
-                if (m3u8Match) channelName = m3u8Match[1];
-                else if (channelParamMatch) channelName = channelParamMatch[1];
-                
-                if (channelName) {
-                    console.log(`[StreamFetcher] Detected channel: ${channelName}`);
-                    
-                    for (const playerType of CLEAN_PLAYER_TYPES) {
-                        try {
-                            const tokenData = await getAccessToken(channelName, playerType);
-                            if (!tokenData?.data?.streamPlaybackAccessToken) continue;
-                            
-                            const token = tokenData.data.streamPlaybackAccessToken;
-                            const cleanUrl = new URL(url);
-                            cleanUrl.searchParams.set('sig', token.signature);
-                            cleanUrl.searchParams.set('token', token.value);
-                            cleanUrl.searchParams.set('player_type', playerType);
-                            
-                            const testResponse = await originalFetch(cleanUrl.toString());
-                            if (!testResponse.ok) continue;
-                            
-                            const testText = await testResponse.text();
-                            
-                            if (!testText.includes('stitched-ad') && 
-                                !testText.includes('SCTE35') && 
-                                !testText.includes('twitch-stitched-ad') &&
-                                testText.includes('#EXTINF')) {
-                                console.log(`[StreamFetcher] Preemptively using clean stream (${playerType})`);
-                                return new Response(testText, {
-                                    status: 200,
-                                    headers: testResponse.headers
-                                });
-                            } else {
-                                console.log(`[StreamFetcher] ${playerType} has ads, trying next...`);
-                            }
-                        } catch (err) {
-                            console.log(`[StreamFetcher] ${playerType} failed: ${err.message}`);
-                        }
-                    }
+        if (isLivePlaylistRequest(url)) {
+            const channelName = extractChannelNameFromUrl(url);
+            if (channelName) {
+                const priority = buildPlayerTypePriority();
+                const cleanResult = await findCleanStream(channelName, url, priority);
+                if (cleanResult) {
+                    console.log(`[StreamFetcher] Preemptively using clean stream (${cleanResult.playerType})`);
+                    return new Response(cleanResult.text, {
+                        status: 200,
+                        headers: cleanResult.headers
+                    });
                 }
             }
-            
+
             const response = await originalFetch.apply(this, arguments);
-            
-            if (url.includes('/channel/hls/') || url.includes('usher.ttvnw.net')) {
-                let channelName = null;
-                const m3u8Match = url.match(/\/([^\/]+)\.m3u8/);
-                const channelParamMatch = url.match(/[?&]channel=([^&]+)/);
-                
-                if (m3u8Match) channelName = m3u8Match[1];
-                else if (channelParamMatch) channelName = channelParamMatch[1];
-                
-                if (channelName) {
-                    const text = await response.clone().text();
-                    
-                    if (text.includes('stitched-ad') || text.includes('SCTE35') || text.includes('twitch-stitched-ad')) {
-                        console.log('[StreamFetcher] Ads detected, searching clean stream...');
-                        
-                        const urlParams = new URL(url);
-                        let originalPlayerType = null;
-                        try {
-                            const tokenParam = urlParams.searchParams.get('token');
-                            if (tokenParam) {
-                                const decodedToken = JSON.parse(atob(tokenParam.split('.')[1]));
-                                originalPlayerType = decodedToken.channel_id ? 'site' : null;
-                            }
-                        } catch (e) {}
-                        
-                        const typesToTry = BACKUP_PLAYER_TYPES.filter(type => type !== originalPlayerType);
-                        
-                        for (const playerType of typesToTry) {
-                            try {
-                                const tokenData = await getAccessToken(channelName, playerType);
-                                if (!tokenData?.data?.streamPlaybackAccessToken) continue;
-                                
-                                const token = tokenData.data.streamPlaybackAccessToken;
-                                const backupUrl = new URL(url);
-                                backupUrl.searchParams.set('sig', token.signature);
-                                backupUrl.searchParams.set('token', token.value);
-                                backupUrl.searchParams.set('player_type', playerType);
-                                
-                                const backupResponse = await originalFetch(backupUrl.toString());
-                                if (!backupResponse.ok) continue;
-                                
-                                const backupText = await backupResponse.text();
-                                
-                                if (!backupText.includes('stitched-ad') && 
-                                    !backupText.includes('SCTE35') && 
-                                    !backupText.includes('twitch-stitched-ad') &&
-                                    backupText.includes('#EXTINF')) {
-                                    console.log(`[StreamFetcher] Found clean stream (${playerType})`);
-                                    usedPlayerTypes.add(playerType);
-                                    return new Response(backupText, {
-                                        status: 200,
-                                        headers: backupResponse.headers
-                                    });
-                                }
-                            } catch (err) {
-                                console.log(`[StreamFetcher] Failed ${playerType}:`, err.message);
-                            }
-                        }
-                        
-                        console.log('[StreamFetcher] No clean stream found, filtering manually...');
-                        const filteredText = text.split('\n')
-                            .filter(line => !line.includes('stitched-ad') && 
-                                           !line.includes('SCTE35') && 
-                                           !line.includes('DATERANGE'))
-                            .join('\n');
-                        
-                        if (filteredText.includes('#EXTINF')) {
-                            return new Response(filteredText, {
-                                status: 200,
-                                headers: response.headers
-                            });
-                        }
+
+            if (channelName) {
+                const playlistText = await response.clone().text();
+
+                if (playlistHasAds(playlistText)) {
+                    console.log('[StreamFetcher] Ads detected, searching clean stream...');
+
+                    const urlParams = new URL(url);
+                    const originalPlayerType = urlParams.searchParams.get('player_type');
+                    const fallbackOrder = buildPlayerTypePriority(originalPlayerType);
+                    const fallbackResult = await findCleanStream(channelName, url, fallbackOrder);
+
+                    if (fallbackResult) {
+                        console.log(`[StreamFetcher] Found clean stream (${fallbackResult.playerType})`);
+                        return new Response(fallbackResult.text, {
+                            status: 200,
+                            headers: fallbackResult.headers
+                        });
+                    }
+
+                    console.log('[StreamFetcher] No clean stream found, filtering manually...');
+                    const filteredText = playlistText
+                        .split('\n')
+                        .filter(line => !playlistHasAds(line) && !line.includes('DATERANGE'))
+                        .join('\n');
+
+                    if (filteredText.includes('#EXTINF')) {
+                        return new Response(filteredText, {
+                            status: 200,
+                            headers: response.headers
+                        });
                     }
                 }
             }
-            
+
             return response;
         }
         

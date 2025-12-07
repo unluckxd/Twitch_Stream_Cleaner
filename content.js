@@ -111,53 +111,128 @@ function injectConfigPatcher() {
   const script = document.createElement('script');
   script.textContent = `
     (function() {
+      const DEVICE_KEY = '__twitchCleanerDeviceId';
+      const SESSION_ID = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2);
+      const preferredPlayerType = 'picture-by-picture';
+
+      function getDeviceId() {
+        try {
+          const cached = localStorage.getItem(DEVICE_KEY);
+          if (cached) return cached;
+          const fresh = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+          localStorage.setItem(DEVICE_KEY, fresh);
+          return fresh;
+        } catch (err) {
+          return SESSION_ID;
+        }
+      }
+
+      const DEVICE_ID = getDeviceId();
+      const NEG_KEYS = new Set(['adsEnabled', 'stitched', 'show_ads', 'surestream', 'csai', 'prerollEnabled', 'midrollEnabled']);
+      const POS_KEYS = new Set(['disable_ads']);
+
+      function sanitizePayload(payload) {
+        const visited = new WeakSet();
+        function scrub(node) {
+          if (!node || typeof node !== 'object' || visited.has(node)) return;
+          visited.add(node);
+
+          if (Array.isArray(node)) {
+            node.forEach(scrub);
+            return;
+          }
+
+          Object.keys(node).forEach((key) => {
+            if (NEG_KEYS.has(key)) {
+              node[key] = false;
+              return;
+            }
+            if (POS_KEYS.has(key)) {
+              node[key] = true;
+              return;
+            }
+            scrub(node[key]);
+          });
+        }
+        scrub(payload);
+        return payload;
+      }
+
+      function rewritePlayerType(bodyText) {
+        try {
+          const parsed = JSON.parse(bodyText);
+          const visited = new WeakSet();
+          function apply(node) {
+            if (!node || typeof node !== 'object' || visited.has(node)) return;
+            visited.add(node);
+            if (node.variables && node.variables.playerType && node.variables.playerType !== preferredPlayerType) {
+              node.variables.playerType = preferredPlayerType;
+            }
+            if (Array.isArray(node)) {
+              node.forEach(apply);
+              return;
+            }
+            Object.values(node).forEach(apply);
+          }
+          apply(parsed);
+          return JSON.stringify(parsed);
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function stampIdentity(headers) {
+        if (!headers.has('Device-ID')) headers.set('Device-ID', DEVICE_ID);
+        if (!headers.has('Client-Session-Id')) headers.set('Client-Session-Id', SESSION_ID);
+        return headers;
+      }
+
       const originalFetch = window.fetch;
-      window.fetch = async function(url, options) {
-        if (typeof url === 'string' && url.includes('gql.twitch.tv/gql')) {
-          if (options && options.body) {
+      window.fetch = async function(resource, init) {
+        const request = new Request(resource, init);
+        const url = request.url || '';
+        const isGql = url.indexOf('gql.twitch.tv/gql') !== -1;
+        let finalRequest = request;
+
+        if (isGql) {
+          let patchedBody = null;
+          if (request.method && request.method.toUpperCase() === 'POST') {
             try {
-              const body = JSON.parse(options.body);
-              const preferredPlayerType = 'picture-by-picture';
-              
-              if (Array.isArray(body)) {
-                body.forEach(item => {
-                  if (item?.operationName === 'PlaybackAccessToken' && item?.variables?.playerType) {
-                    if (item.variables.playerType !== preferredPlayerType) {
-                      console.log(\`[TwitchCleaner] '\${item.variables.playerType}' → '\${preferredPlayerType}'\`);
-                      item.variables.playerType = preferredPlayerType;
-                    }
-                  }
-                });
-              } else if (body?.operationName === 'PlaybackAccessToken' && body?.variables?.playerType) {
-                if (body.variables.playerType !== preferredPlayerType) {
-                  console.log(\`[TwitchCleaner] '\${body.variables.playerType}' → '\${preferredPlayerType}'\`);
-                  body.variables.playerType = preferredPlayerType;
-                }
-              }
-              
-              options = { ...options, body: JSON.stringify(body) };
-            } catch (e) {}
+              const rawBody = await request.clone().text();
+              const rewritten = rewritePlayerType(rawBody);
+              if (rewritten) patchedBody = rewritten;
+            } catch (err) {
+              console.debug('[TwitchCleaner] Failed to parse GQL body:', err.message);
+            }
+          }
+
+          const headers = stampIdentity(new Headers(request.headers));
+          const newInit = { headers: headers };
+          if (patchedBody !== null) {
+            newInit.body = patchedBody;
+          }
+          finalRequest = new Request(request, newInit);
+        }
+
+        const response = await originalFetch.call(this, finalRequest);
+
+        if (isGql) {
+          try {
+            const payload = await response.clone().json();
+            sanitizePayload(payload);
+            const headers = new Headers(response.headers);
+            headers.delete('content-length');
+            return new Response(JSON.stringify(payload), {
+              status: response.status,
+              statusText: response.statusText,
+              headers: headers
+            });
+          } catch (err) {
+            console.debug('[TwitchCleaner] GQL sanitize skipped:', err.message);
           }
         }
-        return originalFetch.call(this, url, options);
-      };
-      
-      const origParse = JSON.parse;
-      JSON.parse = function(text) {
-        const data = origParse.apply(this, arguments);
-        if (data && typeof data === 'object') {
-          if (data.adsEnabled) data.adsEnabled = false;
-          if (data.stitched) data.stitched = false;
-          if (data.show_ads) data.show_ads = false;
-          if (data.disable_ads) data.disable_ads = true;
-          
-          if (data.surestream) data.surestream = false;
-          if (data.csai) data.csai = false;
-          
-          if (data.prerollEnabled) data.prerollEnabled = false;
-          if (data.midrollEnabled) data.midrollEnabled = false;
-        }
-        return data;
+
+        return response;
       };
 
       ['AmazonVideoAds', 'twitchAds'].forEach((prop) => {
@@ -182,6 +257,41 @@ function injectConfigPatcher() {
   `;
   (document.head || document.documentElement).appendChild(script);
   script.remove();
+}
+
+function registerRelayWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  let ownsRelay = false;
+  try {
+    ownsRelay = localStorage.getItem('__twitchCleanerRelayOwned') === 'true';
+  } catch (err) {}
+
+  navigator.serviceWorker.getRegistration('/')
+    .then((registration) => {
+      if (registration && !ownsRelay) {
+        console.debug('[TwitchCleaner] Existing Service Worker detected, relay skipped.');
+        return;
+      }
+
+      const swUrl = browser.runtime.getURL('sw-relay.js');
+      return fetch(swUrl)
+        .then((resp) => resp.text())
+        .then((code) => {
+          const blob = new Blob([code], { type: 'text/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+          return navigator.serviceWorker.register(blobUrl, { scope: '/' })
+            .then(() => {
+              console.log('[TwitchCleaner] Relay Service Worker registered.');
+              try {
+                localStorage.setItem('__twitchCleanerRelayOwned', 'true');
+              } catch (err) {}
+            })
+            .catch((err) => console.warn('[TwitchCleaner] Relay SW registration failed:', err.message))
+            .finally(() => setTimeout(() => URL.revokeObjectURL(blobUrl), 5000));
+        });
+    })
+    .catch((err) => console.debug('[TwitchCleaner] SW registration query failed:', err.message));
 }
 
 let lastAdBlockTime = 0;
@@ -252,6 +362,7 @@ function init() {
       injectStreamFetcher();
       injectStyles();
       injectConfigPatcher();
+      registerRelayWorker();
       setInterval(nukeAds, 1000);
       console.log('[TwitchCleaner] UI Armor Active');
     }
