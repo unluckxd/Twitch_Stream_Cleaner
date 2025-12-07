@@ -12,6 +12,8 @@ $files = @(
     "manifest.json",
     "background.js",
     "content.js",
+    "stream-fetcher.js",
+    "sw-relay.js",
     "popup.html",
     "popup.css",
     "popup.js",
