@@ -19,6 +19,10 @@
 
 **Twitch Stream Cleaner** is a specialized, lightweight Firefox extension engineered to block Twitch ads without compromising stream latency or privacy. It features a three-layer protection system and a real-time engineering dashboard to monitor performance.
 
+## ⚠️ Important Note
+
+Unfortunately, due to Twitch API limitations, ads may appear at the beginning of the stream. The extension actively blocks ads after the initial load.
+
 ## Key Features
 
 * **Three-Layer Protection System:**
