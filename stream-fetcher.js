@@ -29,6 +29,13 @@
         'embed-legacy',
         'site'
     ];
+    const HIGH_QUALITY_TYPES = [
+        'site',
+        'frontpage',
+        'embed',
+        'popout',
+        'thunderdome'
+    ];
     const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
     const CONCURRENT_TRIES = 3;
     
@@ -52,9 +59,17 @@
     }
 
     function buildPlayerTypePriority(excludedType = null) {
-        const preferred = Array.from(usedPlayerTypes).filter((type) => type !== excludedType);
-        const remaining = CLEAN_PLAYER_TYPES.filter((type) => type !== excludedType && !usedPlayerTypes.has(type));
-        return [...preferred, ...remaining];
+        const seen = new Set();
+        const order = [];
+        const push = (type) => {
+            if (!type || type === excludedType || seen.has(type)) return;
+            seen.add(type);
+            order.push(type);
+        };
+        HIGH_QUALITY_TYPES.forEach(push);
+        Array.from(usedPlayerTypes).forEach(push);
+        CLEAN_PLAYER_TYPES.forEach(push);
+        return order;
     }
 
     async function attemptCleanRequest(channelName, url, playerType) {

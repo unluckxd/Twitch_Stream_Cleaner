@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Twitch Stream Cleaner",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "Watch streams, not ads.",
   "permissions": [
     "webRequest",
