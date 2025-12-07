@@ -80,6 +80,25 @@ function sanitizePayload(payload) {
   return payload;
 }
 
+function clonePayload(payload) {
+  try {
+    return JSON.parse(JSON.stringify(payload));
+  } catch (err) {
+    return payload;
+  }
+}
+
+function buildCacheEntry(originalPayload) {
+  const raw = originalPayload;
+  const cleanSource = clonePayload(originalPayload);
+  const clean = sanitizePayload(cleanSource);
+  return {
+    raw,
+    clean,
+    storedAt: Date.now()
+  };
+}
+
 function createJsonResponse(payload, sourceResponse) {
   const headers = new Headers(sourceResponse ? sourceResponse.headers : undefined);
   headers.set('content-type', 'application/json');
@@ -98,9 +117,9 @@ async function fetchAndUpdate(request, cacheKey) {
   }
   try {
     const payload = await response.clone().json();
-    sanitizePayload(payload);
-    tokenCache.set(cacheKey, { payload, storedAt: Date.now() });
-    return createJsonResponse(payload, response);
+    const entry = buildCacheEntry(payload);
+    tokenCache.set(cacheKey, entry);
+    return createJsonResponse(entry.clean, response);
   } catch (err) {
     return response;
   }
@@ -117,7 +136,7 @@ self.addEventListener('fetch', (event) => {
       const entry = tokenCache.get(cacheKey);
       if (now - entry.storedAt < TOKEN_TTL_MS) {
         event.waitUntil(fetchAndUpdate(event.request.clone(), cacheKey).catch(() => {}));
-        return createJsonResponse(entry.payload, null);
+        return createJsonResponse(entry.clean, null);
       }
       tokenCache.delete(cacheKey);
     }
@@ -125,7 +144,7 @@ self.addEventListener('fetch', (event) => {
       return await fetchAndUpdate(event.request, cacheKey);
     } catch (err) {
       if (cacheKey && tokenCache.has(cacheKey)) {
-        return createJsonResponse(tokenCache.get(cacheKey).payload, null);
+        return createJsonResponse(tokenCache.get(cacheKey).clean, null);
       }
       throw err;
     }

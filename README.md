@@ -12,12 +12,12 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.3.1-blue" alt="Version">
 </p>
 
 ---
 
-**Twitch Stream Cleaner** is a specialized, lightweight Firefox extension engineered to block Twitch ads without compromising stream latency or privacy. It features a three-layer protection system and a real-time engineering dashboard to monitor performance.
+**Twitch Stream Cleaner** is a specialized, lightweight Firefox extension engineered to block Twitch ads without compromising stream latency or privacy. It features a multi-layer protection system and a real-time engineering dashboard to monitor performance.
 
 ## Important Note
 
@@ -27,24 +27,31 @@ Unfortunately, due to Twitch API limitations, ads may appear at the beginning of
 
 * **Three-Layer Protection System:**
     * **Layer 1 - HLS Playlist Cleaner:** Intercepts and strips ad segments from `.m3u8` playlists before they reach the player
-    * **Layer 2 - Alternative Stream Fetcher:** Proactively searches for ad-free streams using 5 different player types, with pre-emptive loading and smart rotation
-    * **Layer 3 - Config Patcher:** Disables ad-related flags in Twitch's player configuration via `JSON.parse` patching
+  * **Layer 2 - Alternative Stream Fetcher:** Proactively searches for ad-free streams using 5+ different player types, with pre-emptive loading and smart rotation
+  * **Layer 3 - Config Patcher:** Disables ad-related flags in Twitch's player configuration via request/response sanitizers
 * **Engineering Dashboard:** A built-in dark-mode UI monitoring real-time metrics:
     * **Segments Stripped:** Exact count of ad segments removed
     * **Avg. Latency:** Processing overhead (typically < 0.1ms)
     * **Last Intervention:** Time since the last ad block
 * **UI Armor:** Automatically removes ad overlays, banners, purple screens, and extension slots from the DOM
+* **Relay Service Worker:** Caches both "clean" and "dirty" PlaybackAccessToken responses, instantly replying with sanitized tokens while silently replaying the originals so Twitch statistics remain stable
+* **Ad Stall Guardian:** Detects when the player is stuck on an "ad in progress" slate and force-advances playback / resets `playerType` without user interaction
+* **Timeshift Buffer:** Keeps a rolling cache of the last clean HLS segments to reseed the playlist if Twitch serves an ad-only manifest
 * **Privacy & Telemetry Protection:** Blocks trackers from ScorecardResearch, Amazon AdSystem, and Comscore
 * **Zero Latency:** Optimized parsing logic ensures no delay is added to stream buffering
+
+## Effectiveness
+
+In practice the extension blocks **≈90‑95%** of Twitch ad slots (pre-roll + mid-roll). The remaining ~5‑10% happen when Twitch refreshes server-side targeting or injects entirely ad-only manifests faster than alternative sources become available. In those cases the HLS cleaner and timeshift buffer still prevent playback hangs, so you may only notice a one- or two-second quality dip instead of a full commercial.
 
 ## How It Works
 
 Twitch uses sophisticated Server-Side Ad Insertion (SSAI) to inject ads directly into the stream. This extension employs a comprehensive three-layer defense system:
 
-### Layer 1: Background Network Interception
-The background script intercepts all `.m3u8` playlist requests using the `webRequest.filterResponseData` API. It parses the HLS manifest in real-time, identifies ad markers (`#EXT-X-DATERANGE` with `SCTE35-OUT`, `stitched-ad` tags), and surgically removes them while preserving stream integrity (headers, discontinuity sequences, and timing).
+### Layer 1: Background Network Interception + Timeshift Buffer
+The background script intercepts all `.m3u8` playlist requests using the `webRequest.filterResponseData` API. It parses the HLS manifest in real-time, identifies ad markers (`#EXT-X-DATERANGE` with `SCTE35-OUT`, `stitched-ad` tags), and surgically removes them while preserving stream integrity (headers, discontinuity sequences, and timing). Each clean segment is cached for up to 30 entries so the player can be immediately reseeded if Twitch delivers an ad-only playlist.
 
-### Layer 2: Alternative Stream Fetcher
+### Layer 2: Alternative Stream Fetcher + Ad Stall Guardian
 A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` requests via `fetch` and `XMLHttpRequest` interception. The system operates in two modes:
 
 **Proactive Mode (Pre-emptive):**
@@ -60,12 +67,13 @@ A page-context injection script (`stream-fetcher.js`) monitors all `.m3u8` reque
 5. Validates that the stream contains actual content (`#EXTINF` markers) and no ad markers
 6. If no clean stream is found, applies manual filtering as a last resort
 
-This dual-mode approach leverages Twitch's own API to access ad-free streams while minimizing latency. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
+This dual-mode approach leverages Twitch's own API to access ad-free streams while minimizing latency. A watchdog running alongside the player detects when playback freezes on the "ad" slate and briefly fast-forwards the `<video>` element while forcing a token/player-type reset, clearing the stall without user input. The background script also randomly rotates `playerType` in GraphQL requests to diversify token acquisition and reduce ad targeting.
 
-### Layer 3: Configuration Patching & UI Armor
-The content script operates on two fronts:
-1. **Config Patcher:** Patches `JSON.parse` globally to neutralize ad-related flags (`adsEnabled`, `stitched`, `csai`, `prerollEnabled`, `midrollEnabled`) before they reach the player
-2. **UI Armor:** Continuously scans and removes ad-related DOM elements (overlays, banners, celebration animations, extension slots) every second using optimized CSS selectors
+### Layer 3: Configuration Patching, Relay SW & UI Armor
+The content script operates on two fronts while a relay Service Worker backs it up:
+1. **Config Patcher:** Sanitizes GraphQL request bodies and responses to neutralize ad-related flags (`adsEnabled`, `stitched`, `csai`, `prerollEnabled`, `midrollEnabled`) before they reach the player, while stamping persistent `Device-ID`/`Client-Session-Id` headers to mimic a stable client
+2. **Relay SW:** Responds instantly with a cached “clean” PlaybackAccessToken while asynchronously replaying the original “dirty” token to Twitch so pre-roll accounting succeeds without actually showing the ad
+3. **UI Armor:** Continuously scans and removes ad-related DOM elements (overlays, banners, celebration animations, extension slots) every second using optimized CSS selectors
 
 ### Request Blocking
 The background script also blocks requests to:

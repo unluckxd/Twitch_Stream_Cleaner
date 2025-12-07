@@ -35,6 +35,17 @@
     let accessTokenCache = new Map();
     let usedPlayerTypes = new Set();
 
+    window.addEventListener('message', (event) => {
+        if (event.source !== window || !event.data || event.data.source !== 'twitch-cleaner') {
+            return;
+        }
+        if (event.data.type === 'TWITCH_CLEANER_FORCE_RECOVERY') {
+            accessTokenCache.clear();
+            usedPlayerTypes.clear();
+            console.log('[StreamFetcher] Force recovery: caches cleared');
+        }
+    });
+
     function playlistHasAds(text) {
         if (!text) return false;
         return text.includes('stitched-ad') || text.includes('SCTE35') || text.includes('twitch-stitched-ad');

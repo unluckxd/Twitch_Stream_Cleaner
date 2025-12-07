@@ -96,6 +96,9 @@ const AD_METADATA_PATTERNS = [
   /EXT-X-TWITCH-PREFETCH-AD/i
 ];
 
+const SEGMENT_HISTORY = new Map();
+const SEGMENT_BUFFER_LIMIT = 30;
+
 browser.storage.local.get(['isEnabled', 'blockedCount', 'logs', 'avgBlockTime'], (data) => {
   IS_ENABLED = data.isEnabled !== false;
   BLOCKED_COUNT = data.blockedCount || 0;
@@ -173,7 +176,45 @@ function estimateSkipCount(duration) {
   return Math.max(1, Math.ceil(duration / averageSegmentLength));
 }
 
-function processPlaylist(text) {
+function getPlaylistKey(url = '') {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch (err) {
+    return 'default-playlist';
+  }
+}
+
+function rememberSegment(key, extInfLine, uriLine) {
+  if (!key || !extInfLine || !uriLine) return;
+  if (!SEGMENT_HISTORY.has(key)) {
+    SEGMENT_HISTORY.set(key, []);
+  }
+  const bucket = SEGMENT_HISTORY.get(key);
+  bucket.push({ extinf: extInfLine, uri: uriLine, storedAt: Date.now() });
+  if (bucket.length > SEGMENT_BUFFER_LIMIT) {
+    bucket.splice(0, bucket.length - SEGMENT_BUFFER_LIMIT);
+  }
+}
+
+function buildTimeshiftPlaylist(key) {
+  const bucket = SEGMENT_HISTORY.get(key);
+  if (!bucket || bucket.length === 0) return null;
+  const subset = bucket.slice(-Math.min(6, bucket.length));
+  const header = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-TARGETDURATION:4',
+    `#EXT-X-MEDIA-SEQUENCE:${Math.floor(Date.now() / 1000)}`
+  ];
+  subset.forEach((entry) => {
+    header.push(entry.extinf);
+    header.push(entry.uri);
+  });
+  return header.join('\n');
+}
+
+function processPlaylist(text, playlistKey = 'default-playlist') {
   if (!IS_ENABLED) return text;
 
   const startTime = performance.now();
@@ -251,8 +292,12 @@ function processPlaylist(text) {
       continue;
     }
 
+    const segmentExtInf = pendingExtInf;
     flushPending();
     cleanLines.push(line);
+    if (segmentExtInf) {
+      rememberSegment(playlistKey, segmentExtInf, line);
+    }
   }
 
   flushPending();
@@ -272,6 +317,16 @@ function processPlaylist(text) {
   finalClean = finalClean.replace(/.*\/v1\/segment\/ad\/.*/gi, '');
   finalClean = finalClean.replace(/\n\n+/g, '\n');
 
+  const segmentCount = (finalClean.match(/#EXTINF/g) || []).length;
+  if (segmentCount === 0) {
+    const timeshift = buildTimeshiftPlaylist(playlistKey);
+    if (timeshift) {
+      console.log('[TwitchCleaner] Timeshift buffer used for playlist reseed');
+      logToUI('Timeshift buffer fed player');
+      finalClean = timeshift;
+    }
+  }
+
   return finalClean;
 }
 
@@ -282,7 +337,8 @@ browser.webRequest.onBeforeRequest.addListener(
     const filter = browser.webRequest.filterResponseData(details.requestId);
     const decoder = new TextDecoder("utf-8");
     const encoder = new TextEncoder();
-    let chunks = []; 
+    let chunks = [];
+    const playlistKey = getPlaylistKey(details.url);
 
     filter.ondata = event => chunks.push(event.data);
 
@@ -297,7 +353,7 @@ browser.webRequest.onBeforeRequest.addListener(
       }
 
       try {
-        let result = processPlaylist(str);
+        let result = processPlaylist(str, playlistKey);
         
         if (hasAds && result !== str) {
           const segmentCount = (result.match(/#EXTINF/g) || []).length;

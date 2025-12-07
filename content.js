@@ -66,6 +66,22 @@ const CSS_HIDE = `
   }
 `;
 
+const AD_STALL_SELECTORS = [
+  '[data-a-target="video-ad-label"]',
+  '[data-a-target="video-ad-countdown"]',
+  '[data-a-target="player-overlay-ad-slate"]',
+  '.ad-slot-overlay',
+  '.video-player__overlay [data-a-target="player-overlay-text-ad"]'
+];
+
+const STALL_CHECK_INTERVAL = 1500;
+let stallState = {
+  tracking: false,
+  lastTime: 0,
+  stuckSince: 0,
+  cooldownUntil: 0
+};
+
 function injectStyles() {
   const styleId = 'cleaner-css';
   const old = document.getElementById(styleId);
@@ -364,6 +380,7 @@ function init() {
       injectConfigPatcher();
       registerRelayWorker();
       setInterval(nukeAds, 1000);
+      startAdStallGuard();
       console.log('[TwitchCleaner] UI Armor Active');
     }
   });
@@ -373,4 +390,63 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
+}
+
+function hasAdOverlay() {
+  return AD_STALL_SELECTORS.some((sel) => document.querySelector(sel));
+}
+
+function forceAdRecovery(video) {
+  if (!video) return;
+  console.log('[TwitchCleaner] Ad-only stall detected, forcing recovery');
+  try {
+    video.playbackRate = 16;
+    setTimeout(() => {
+      video.playbackRate = 1;
+      if (video.paused && typeof video.play === 'function') {
+        video.play().catch(() => {});
+      }
+    }, 1200);
+  } catch (err) {}
+
+  window.postMessage({ source: 'twitch-cleaner', type: 'TWITCH_CLEANER_FORCE_RECOVERY' }, '*');
+  try {
+    browser.runtime.sendMessage({ type: 'AD_STALL_RECOVERY' });
+  } catch (err) {}
+}
+
+function monitorAdStall() {
+  const video = document.querySelector('video');
+  if (!video || video.readyState < 2 || !hasAdOverlay()) {
+    stallState.tracking = false;
+    return;
+  }
+
+  const now = performance.now();
+  if (!stallState.tracking) {
+    stallState.tracking = true;
+    stallState.lastTime = video.currentTime;
+    stallState.stuckSince = now;
+    return;
+  }
+
+  const delta = Math.abs(video.currentTime - stallState.lastTime);
+  if (delta < 0.05) {
+    if (now - stallState.stuckSince > 2500 && now > stallState.cooldownUntil) {
+      forceAdRecovery(video);
+      stallState.cooldownUntil = now + 8000;
+      stallState.stuckSince = now;
+    }
+  } else {
+    stallState.lastTime = video.currentTime;
+    stallState.stuckSince = now;
+  }
+}
+
+function startAdStallGuard() {
+  setInterval(() => {
+    try {
+      monitorAdStall();
+    } catch (err) {}
+  }, STALL_CHECK_INTERVAL);
 }
