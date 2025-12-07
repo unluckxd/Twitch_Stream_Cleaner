@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/firefox-v120%2B-orange" alt="Firefox">
   <img src="https://img.shields.io/badge/manifest-v2-green" alt="Manifest V2">
-  <img src="https://img.shields.io/badge/version-2.2.7-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.8-blue" alt="Version">
 </p>
 
 ---
@@ -169,7 +169,7 @@ When the extension is active, you'll see these messages in the browser console:
 
 ## Disclaimer
 
-This project is for **educational and research purposes only**. It demonstrates browser extension capabilities for HLS stream manipulation and network traffic analysis. I am not affiliated with Twitch, Amazon, or any associated companies.
+This project is for **educational and research purposes only**. It demonstrates browser extension capabilities for HLS stream manipulation and network traffic analysis. I am not affiliated with Twitch, Amazon, or any associated companies. Please consider supporting your favorite creators by purchasing channel subscriptions or Twitch Turbo instead of relying solely on tooling like this.
 
 ## License
 

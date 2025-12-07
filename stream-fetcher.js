@@ -16,8 +16,15 @@
         'picture-by-picture',
         'thunderdome',
         'popout',
-        'embed',
+        'mobile',
+        'ios',
+        'android_native',
+        'tva',
+        'chromecast',
+        'xbox',
+        'ps4',
         'frontpage',
+        'embed',
         'mini',
         'embed-legacy',
         'site'
@@ -81,7 +88,7 @@
                     const body = JSON.parse(options.body);
                     let modified = false;
                     
-                    const preferredPlayerType = 'embed';
+                    const preferredPlayerType = 'picture-by-picture';
                     
                     if (Array.isArray(body)) {
                         body.forEach(item => {

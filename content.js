@@ -39,6 +39,9 @@ const CSS_HIDE = `
   .InjectLayout-sc-1i43xsx-0.celebration__overlay,
   
   div[data-a-target="player-overlay-content-gate"],
+  div[data-a-target="content-classification-warning-disclosure-overlay"],
+  #channel-player-disclosures,
+  .disclosure-card,
   
   .extension-view__iframe-wrapper,
   .extensions-video-overlay-size-container,
@@ -75,12 +78,33 @@ function injectStyles() {
 }
 
 function injectStreamFetcher() {
+  const resourceUrl = browser.runtime.getURL('stream-fetcher.js');
+  const parent = document.head || document.documentElement;
+
+  function injectInlineFallback() {
+    fetch(resourceUrl)
+      .then(resp => resp.text())
+      .then(code => {
+        const inlineScript = document.createElement('script');
+        inlineScript.textContent = code;
+        parent.appendChild(inlineScript);
+        inlineScript.remove();
+        console.log('[TwitchCleaner] StreamFetcher inline fallback injected');
+      })
+      .catch(err => console.error('[TwitchCleaner] Failed to inline StreamFetcher:', err));
+  }
+
   const script = document.createElement('script');
-  script.src = browser.runtime.getURL('stream-fetcher.js');
+  script.src = resourceUrl;
   script.onload = function() {
     this.remove();
   };
-  (document.head || document.documentElement).appendChild(script);
+  script.onerror = function() {
+    this.remove();
+    console.warn('[TwitchCleaner] StreamFetcher load blocked, using inline fallback');
+    injectInlineFallback();
+  };
+  parent.appendChild(script);
 }
 
 function injectConfigPatcher() {
@@ -93,7 +117,7 @@ function injectConfigPatcher() {
           if (options && options.body) {
             try {
               const body = JSON.parse(options.body);
-              const preferredPlayerType = 'embed';
+              const preferredPlayerType = 'picture-by-picture';
               
               if (Array.isArray(body)) {
                 body.forEach(item => {
@@ -177,6 +201,9 @@ function nukeAds() {
     '[data-a-target="ax-overlay"]',
     '.celebration__overlay',
     'iframe[src*="supervisor.ext-twitch.tv"]',
+    'div[data-a-target="content-classification-warning-disclosure-overlay"]',
+    '#channel-player-disclosures',
+    '.disclosure-card',
     '.extensions-dock__layout',
     '.extensions-dock__dock',
     '.extensions-popover',
